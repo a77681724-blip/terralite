@@ -1,0 +1,26 @@
+[package]
+name = "terralite"
+version = "1.0.0"
+description = "TERRALITE — Realms Unbound. A 2D sandbox survival game."
+authors = ["Aethoria Studios"]
+edition = "2021"
+
+# The library that powers the desktop (and could power mobile) app.
+[lib]
+name = "terralite_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

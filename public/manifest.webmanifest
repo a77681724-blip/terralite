@@ -1,0 +1,19 @@
+{
+  "name": "TERRALITE: Realms Unbound",
+  "short_name": "TERRALITE",
+  "description": "A free 2D sandbox survival game: mine, build, craft and fight.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#05060d",
+  "theme_color": "#05060d",
+  "icons": [
+    {
+      "src": "images/title-bg.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

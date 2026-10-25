@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Iron Ore — TERRALITE (предпросмотр)</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        background: #0a0c14;
+        color: #e8edff;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 -4px;
+        font-size: 26px;
+        color: #c9a98f;
+      }
+      .sub {
+        color: #8a93ad;
+        font-size: 14px;
+      }
+      .row {
+        display: flex;
+        align-items: flex-end;
+        gap: 40px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      canvas {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        background: #000;
+        box-shadow: 0 6px 30px rgba(0, 0, 0, 0.6);
+      }
+      .label {
+        font-size: 13px;
+        color: #9aa4c0;
+      }
+      .big {
+        border-radius: 6px;
+      }
+      .legend {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 560px;
+        font-size: 13px;
+        color: #aab2cf;
+      }
+      .swatch {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        vertical-align: middle;
+        margin-right: 6px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>🪨 Iron Ore (железная руда)</h1>
+      <div class="sub">Так она выглядит в игре TERRALITE — процедурный пиксель-арт 16×16</div>
+    </div>
+
+    <div class="row">
+      <div class="cell">
+        <canvas id="native" width="16" height="16"></canvas>
+        <div class="label">1× — оригинал (16×16 px)</div>
+      </div>
+      <div class="cell">
+        <canvas id="game" width="32" height="32"></canvas>
+        <div class="label">в игре (32×32, как видит игрок)</div>
+      </div>
+      <div class="cell">
+        <canvas id="big" width="320" height="320" class="big"></canvas>
+        <div class="label">20× — крупный план</div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:#8a8f9c"></i>серый камень (фон)</span>
+      <span><i class="swatch" style="background:#c9a98f"></i>железные вкрапления</span>
+      <span><i class="swatch" style="background:#e0c4aa"></i>светлый блик руды</span>
+    </div>
+
+    <script>
+      // ---- Точная копия процедурной генерации из src/pixart.ts (IRON) ----
+      const TEX = 16;
+      const IRON = 8; // id тайла железной руды
+      const PAL_STONE = ["#8a8f9c", "#7e8390", "#72778a", "#949aaa", "#6a6f7c", "#888d99"];
+      const SP_IRON = ["#c9a98f", "#b89476", "#e0c4aa"];
+
+      function hash(x, y, s) {
+        let n = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(s, 83492791)) | 0;
+        n = Math.imul(n ^ (n >>> 13), 1274126177);
+        return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+      }
+      function pick(arr, x, y, s) {
+        return arr[Math.floor(hash(x, y, s) * arr.length) % arr.length];
+      }
+      function noiseFill(c, pal, seed) {
+        for (let y = 0; y < TEX; y++)
+          for (let x = 0; x < TEX; x++) {
+            c.fillStyle = pick(pal, x, y, seed);
+            c.fillRect(x, y, 1, 1);
+          }
+      }
+      function nuggets(c, speckle, seed) {
+        const blobs = 3 + Math.floor(hash(seed, 1, 7) * 3);
+        for (let i = 0; i < blobs; i++) {
+          const bx = 2 + Math.floor(hash(seed, i, 13) * 11);
+          const by = 2 + Math.floor(hash(seed, i, 17) * 11);
+          const col = speckle[i % speckle.length];
+          c.fillStyle = col;
+          c.fillRect(bx, by, 1, 1);
+          if (hash(seed, i, 19) > 0.4) c.fillRect(bx + 1, by, 1, 1);
+          if (hash(seed, i, 29) > 0.5) c.fillRect(bx, by + 1, 1, 1);
+          if (hash(seed, i, 39) > 0.6) c.fillRect(bx + 1, by + 1, 1, 1);
+          c.fillStyle = "rgba(255,255,255,0.5)";
+          c.fillRect(bx, by, 1, 1);
+        }
+      }
+      function edgeShade(c) {
+        c.fillStyle = "rgba(0,0,0,0.16)";
+        c.fillRect(0, TEX - 1, TEX, 1);
+        c.fillRect(TEX - 1, 0, 1, TEX);
+        c.fillStyle = "rgba(255,255,255,0.10)";
+        c.fillRect(0, 0, TEX, 1);
+      }
+
+      // Рисуем железную руду (variant 0, как первый вариант в игре)
+      function drawIron(c, variant) {
+        const seed = IRON * 53 + variant * 131;
+        noiseFill(c, PAL_STONE, seed);
+        nuggets(c, SP_IRON, seed + 9);
+        edgeShade(c);
+      }
+
+      function renderTo(id, variant) {
+        const off = document.createElement("canvas");
+        off.width = 16;
+        off.height = 16;
+        const oc = off.getContext("2d");
+        drawIron(oc, variant);
+
+        const dst = document.getElementById(id);
+        const dctx = dst.getContext("2d");
+        dctx.imageSmoothingEnabled = false;
+        dctx.clearRect(0, 0, dst.width, dst.height);
+        dctx.drawImage(off, 0, 0, 16, 16, 0, 0, dst.width, dst.height);
+      }
+
+      // Рисуем во всех трёх размерах (один и тот же тайл, разные масштабы)
+      renderTo("native", 0);
+      renderTo("game", 0);
+      renderTo("big", 0);
+    </script>
+  </body>
+</html>

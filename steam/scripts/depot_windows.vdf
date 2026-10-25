@@ -1,0 +1,22 @@
+"DepotBuildConfig"
+{
+  // 🔧 Замените 1000001 на реальный ID депо Windows, который выдаст Steamworks.
+  //    (Steamworks → Ваша игра → Installation → General → Depot ID)
+  "DepotID" "1000001"
+
+  // 📁 Папка, где лежит СОБРАННАЯ Windows-версия (результат `npx tauri build`).
+  //    На Windows путь обычно такой (используйте двойные слэши):
+  "ContentRoot" "C:\\TerraliteBuilds\\windows\\"
+
+  "FileMapping"
+  {
+    "LocalPath" "*"
+    "DepotPath" "."
+    "recursive" "1"
+  }
+
+  // Исключаем мусор (pdb-файлы отладки и т.п.) — не нужен в релизе.
+  "FileExclusion" "*.pdb"
+  "FileExclusion" "*.exp"
+  "FileExclusion" "*.lib"
+}

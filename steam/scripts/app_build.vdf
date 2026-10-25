@@ -1,0 +1,25 @@
+"appbuild"
+{
+  // 🔧 Замените 480 на реальный App ID вашей игры (выдаётся при создании в Steamworks).
+  "appid" "480"
+
+  // Описание этой загрузки (видно только вам в Steamworks).
+  "desc" "TERRALITE v1.0.0 — Windows + Linux"
+
+  // Куда SteamPipe положит логи сборки.
+  "buildoutput" "C:\\TerraliteBuilds\\output\\"
+
+  // Корневая папка, относительно которой лежат .vdf депо.
+  "contentroot" "C:\\TerraliteBuilds\\"
+
+  // В какой ветке опубликовать. "" = черновик (надо вручную выставить в Live).
+  // Можно протестировать на "beta" ветке, потом переключить.
+  "setlive" ""
+
+  "depots"
+  {
+    // ID депо  →  имя его конфиг-файла (из папки scripts/).
+    "1000001" "scripts\\depot_windows.vdf"
+    "1000002" "scripts\\depot_linux.vdf"
+  }
+}

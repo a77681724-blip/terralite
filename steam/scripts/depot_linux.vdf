@@ -1,0 +1,18 @@
+"DepotBuildConfig"
+{
+  // 🔧 Замените 1000002 на реальный ID депо Linux, который выдаст Steamworks.
+  "DepotID" "1000002"
+
+  // 📁 Папка, где лежит СОБРАННАЯ Linux-версия (результат `npx tauri build` на Linux).
+  //    Можно держать обе папки рядом на одной машине:
+  "ContentRoot" "C:\\TerraliteBuilds\\linux\\"
+
+  "FileMapping"
+  {
+    "LocalPath" "*"
+    "DepotPath" "."
+    "recursive" "1"
+  }
+
+  "FileExclusion" "*.pdb"
+}
