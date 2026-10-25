@@ -8,6 +8,10 @@ function detectMobile(): boolean {
   return ua || (touch && small);
 }
 
+export function isMobileDevice(): boolean {
+  return detectMobile();
+}
+
 // Capture Android's "install app" prompt for later use
 let deferredPrompt: any = null;
 window.addEventListener("beforeinstallprompt", (e: any) => {
@@ -15,16 +19,40 @@ window.addEventListener("beforeinstallprompt", (e: any) => {
   deferredPrompt = e;
 });
 
+async function lockLandscape() {
+  try {
+    const orientation = (screen as any).orientation;
+    if (orientation?.lock) await orientation.lock("landscape");
+  } catch {
+    /* not supported (iOS, or not in fullscreen) */
+  }
+}
+
 export function goFullscreen() {
+  if (typeof document === "undefined") return;
   const el = document.documentElement as any;
   const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitEnterFullscreen;
-  if (req) {
-    try {
-      const r = req.call(el);
-      if (r && r.catch) r.catch(() => {});
-    } catch {
-      /* ignore */
+  if (document.fullscreenElement) {
+    void lockLandscape();
+    return;
+  }
+  if (!req) {
+    void lockLandscape();
+    return;
+  }
+  try {
+    const r = req.call(el);
+    if (r && typeof r.then === "function") {
+      r.then(() => {
+        void lockLandscape();
+      }).catch(() => {});
+    } else {
+      window.setTimeout(() => {
+        void lockLandscape();
+      }, 150);
     }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -59,7 +87,9 @@ export default function MobileGate({ onPlay }: { onPlay: () => void }) {
       deferredPrompt = null;
       setCanInstall(false);
     } else {
-      goFullscreen();
+      localStorage.setItem("terralite_mobile_skip", "1");
+      setShow(false);
+      onPlay();
     }
   };
 

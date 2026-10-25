@@ -4,7 +4,7 @@ import { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COPPER, IRON, GOLD, DIAMON
 import { audio } from "./audio";
 import bg from "./assets/sandbox-bg.jpg";
 import Landing from "./Landing";
-import MobileGate, { goFullscreen } from "./MobileGate";
+import MobileGate, { goFullscreen, isMobileDevice } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
 import EndingSequence from "./EndingSequence";
 import LanguagePicker from "./LanguagePicker";
@@ -853,6 +853,7 @@ export default function App() {
   const click = () => audio.playSfx("click");
 
   const beginGame = () => {
+    if (isMobileDevice()) goFullscreen();
     click();
     setState(null);
     setEnded(null);
@@ -864,6 +865,7 @@ export default function App() {
     setScreen("playing");
   };
   const selectWorld = (id: number) => {
+    if (isMobileDevice()) goFullscreen();
     click();
     setState(null);
     setEnded(null);
