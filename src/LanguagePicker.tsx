@@ -6,10 +6,11 @@ import sandboxBg from "./assets/sandbox-bg.jpg";
 export default function LanguagePicker({ onDone }: { onDone: (l: Lang) => void }) {
   const [picked, setPicked] = useState<Lang>(getLang());
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center overflow-hidden bg-[#05060d] text-white">
-      <img src={sandboxBg} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#05060d]/80 to-[#05060d]" />
-      <div className="relative z-10 w-full max-w-md px-6 text-center">
+    <div className="fixed inset-0 z-[300] overflow-y-auto bg-[#05060d] text-white">
+      <img src={sandboxBg} alt="" className="fixed inset-0 h-full w-full object-cover opacity-25" />
+      <div className="fixed inset-0 bg-gradient-to-b from-[#05060d]/80 to-[#05060d]" />
+      <div className="relative z-10 flex min-h-full items-center justify-center p-6">
+      <div className="w-full max-w-md text-center">
         <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-3xl shadow-[0_0_30px_rgba(255,170,70,0.5)]">
           ⛏️
         </div>
@@ -41,6 +42,7 @@ export default function LanguagePicker({ onDone }: { onDone: (l: Lang) => void }
         >
           ▶
         </button>
+      </div>
       </div>
     </div>
   );

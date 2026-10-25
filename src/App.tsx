@@ -648,13 +648,13 @@ function TitleScreen({
   toggleSfx: () => void;
 }) {
   return (
-    <div className="anim-fade relative h-full w-full overflow-hidden">
+    <div className="anim-fade relative min-h-[100dvh] w-full overflow-hidden">
       <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover opacity-80" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-[#070a12]" />
       {motes.map((m, i) => (
         <span key={i} className="anim-float absolute rounded-full bg-amber-200" style={{ left: `${m.left}%`, top: `${m.top}%`, width: m.size, height: m.size, opacity: m.op, animationDelay: `${m.delay}s`, animationDuration: `${m.dur}s`, boxShadow: "0 0 8px #ffd277" }} />
       ))}
-      <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
+      <div className="relative z-10 flex min-h-[100dvh] flex-col items-center justify-center px-6 text-center">
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/40 px-4 py-1 text-[10px] uppercase tracking-[0.4em] text-amber-200/90 sm:text-xs">⛏ {t("tagline")}</div>
         <h1 className="title-gradient text-6xl font-black leading-none drop-shadow-2xl sm:text-8xl md:text-9xl">TERRALITE</h1>
         <p className="mt-2 text-base tracking-[0.4em] text-emerald-100/90 drop-shadow sm:text-xl">REALMS UNBOUND</p>
@@ -691,7 +691,7 @@ function StoryScreen({ onBegin, onBack }: { onBegin: () => void; onBack: () => v
   const PAGES = 4;
   const last = page === PAGES - 1;
   return (
-    <div className="anim-fade relative flex h-full w-full items-center justify-center bg-[#070a12] px-6">
+    <div className="anim-fade relative flex min-h-[100dvh] w-full items-center justify-center bg-[#070a12] px-6 py-10">
       <div className="pointer-events-none absolute inset-0 opacity-30" style={{ background: "radial-gradient(circle at 50% 30%, rgba(80,160,90,0.4), transparent 60%)" }} />
       <div className="relative z-10 max-w-2xl text-center">
         <div className="mb-8 text-xs uppercase tracking-[0.5em] text-emerald-300/70">{t("story_begin")}</div>
@@ -738,7 +738,7 @@ function HowToScreen({ onBack }: { onBack: () => void }) {
     { h: t("h6t"), d: t("h6d") },
   ];
   return (
-    <div className="anim-fade h-full w-full overflow-y-auto bg-[#070a12] px-6 py-10">
+    <div className="anim-fade min-h-[100dvh] w-full bg-[#070a12] px-6 py-10">
       <div className="mx-auto max-w-2xl">
         <h2 className="text-3xl font-bold text-amber-100 sm:text-4xl">{t("how_title")}</h2>
         <p className="mt-2 text-sm text-white/55">{t("how_sub")}</p>
@@ -931,6 +931,11 @@ export default function App() {
     setIsTouch(typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0));
   }, []);
 
+  useEffect(() => {
+    document.body.classList.toggle("game-active", playing);
+    return () => document.body.classList.remove("game-active");
+  }, [playing]);
+
   // SECRET GOD MENU: hold ALL of F1..F10 at once to open it.
   const fkeys = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -957,7 +962,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#070a12] text-white">
+    <div className={playing ? "fixed inset-0 overflow-hidden bg-[#070a12] text-white" : "relative min-h-[100dvh] w-full bg-[#070a12] text-white"}>
       {needLang && (
         <LanguagePicker
           onDone={() => setNeedLang(false)}

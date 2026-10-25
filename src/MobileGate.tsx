@@ -94,9 +94,10 @@ export default function MobileGate({ onPlay }: { onPlay: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#05060d] p-6 text-white">
-      <div className="absolute inset-0 opacity-30" style={{ background: "radial-gradient(circle at 50% 30%, rgba(120,80,200,0.5), transparent 60%)" }} />
-      <div className="relative z-10 w-full max-w-md text-center">
+    <div className="fixed inset-0 z-[100] overflow-y-auto bg-[#05060d] text-white">
+      <div className="fixed inset-0 opacity-30" style={{ background: "radial-gradient(circle at 50% 30%, rgba(120,80,200,0.5), transparent 60%)" }} />
+      <div className="relative z-10 flex min-h-full items-center justify-center p-6">
+      <div className="w-full max-w-md text-center">
         <div className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-4xl shadow-[0_0_30px_rgba(255,170,70,0.5)]">
           ⛏️
         </div>
@@ -151,6 +152,7 @@ export default function MobileGate({ onPlay }: { onPlay: () => void }) {
           </div>
         </div>
         <p className="mt-4 text-[11px] text-white/35">Бесплатно · работает офлайн после установки</p>
+      </div>
       </div>
     </div>
   );

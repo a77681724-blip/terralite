@@ -252,7 +252,7 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
   const WORLD_BULLETS = [t("world1"), t("world2"), t("world3"), t("world4")];
 
   return (
-    <div className="landing-scroll min-h-screen w-full overflow-y-auto bg-[#070a12] text-white">
+    <div className="landing-scroll min-h-screen w-full bg-[#070a12] text-white">
       {/* ===== SCROLL PROGRESS ===== */}
       <div className="fixed inset-x-0 top-0 z-[60] h-0.5">
         <div className="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-150" style={{ width: `${progress}%` }} />

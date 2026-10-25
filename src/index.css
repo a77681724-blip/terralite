@@ -6,27 +6,36 @@
   --violet: #b07bff;
 }
 
-html,
+html {
+  min-height: 100%;
+  background: #05060d;
+}
+
 body,
 #root {
-  height: 100%;
+  min-height: 100dvh;
   margin: 0;
   background: #05060d;
-  overflow: hidden;
-  /* kill the 300ms tap delay & overscroll bounce */
   touch-action: manipulation;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
 }
 
 body {
+  overflow-x: hidden;
   font-family: "Rajdhani", system-ui, sans-serif;
   color: #eaf0ff;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* While a run is active the page is a fixed full-screen surface. */
+body.game-active {
+  overflow: hidden;
   touch-action: none;
+  overscroll-behavior: none;
 }
 
 .font-display {
