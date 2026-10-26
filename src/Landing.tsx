@@ -278,7 +278,7 @@ export default function Landing({ onPlay, onContinue, onSelectWorld, onChapter2 
     { icon: "👑", title: t("f6t"), text: t("f6d"), color: "from-yellow-500/20 to-amber-500/5" },
   ];
   const STATS = [
-    { v: "16", l: t("stat_quests") },
+    { v: "35", l: t("stat_quests") },
     { v: "17+", l: t("stat_blocks") },
     { v: "∞", l: t("stat_worlds") },
     { v: "1", l: t("stat_boss") },

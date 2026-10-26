@@ -3,7 +3,7 @@
 // to the world with nearest-neighbour scaling for a crisp retro look.
 // Background "wall" textures are also generated for caves.
 
-import { GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COAL, COPPER, IRON, GOLD, DIAMOND, PLANK, GLASS, WORKBENCH, FURNACE } from "./world";
+import { GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COAL, COPPER, IRON, GOLD, DIAMOND, PLANK, GLASS, WORKBENCH, FURNACE, CLOUD, CLOUDSTONE, SKY_SPIRE } from "./world";
 
 export const TEX = 16; // logical pixel resolution per tile
 
@@ -228,6 +228,59 @@ function buildTile(id: number, variant: number): HTMLCanvasElement {
       c.fillRect(6, 9, 2, 1);
       c.fillStyle = "rgba(0,0,0,0.4)";
       c.fillRect(4, 6, 8, 1);
+      break;
+    }
+    case CLOUD: {
+      c.fillStyle = "#dff1ff";
+      c.fillRect(0, 0, TEX, TEX);
+      for (let y = 0; y < TEX; y++) {
+        for (let x = 0; x < TEX; x++) {
+          if (hash(seed, x, y) > 0.72) {
+            c.fillStyle = hash(seed + 3, x, y) > 0.5 ? "#f7fcff" : "#c9e6f8";
+            c.fillRect(x, y, 1, 1);
+          }
+        }
+      }
+      // round, fluffy top edge
+      c.fillStyle = "#ffffff";
+      for (let x = 0; x < TEX; x += 4) {
+        const r = 1 + Math.floor(hash(seed, x, 7) * 2);
+        c.fillRect(x, 0, 3, r);
+        c.fillRect(x + 1, r, 2, 1);
+      }
+      c.fillStyle = "rgba(120,170,210,0.22)";
+      c.fillRect(0, TEX - 3, TEX, 2);
+      break;
+    }
+    case CLOUDSTONE: {
+      noiseFill(c, ["#c3d9ea", "#b7cfe2", "#cfe3f2", "#a8c4da", "#bdd5e7", "#c9deee"], seed);
+      cracks(c, seed, "rgba(90,120,150,0.38)");
+      // embedded glints
+      c.fillStyle = "rgba(255,255,255,0.55)";
+      for (let i = 0; i < 3; i++) {
+        c.fillRect(2 + Math.floor(hash(seed, i, 4) * 12), 2 + Math.floor(hash(seed, i, 8) * 12), 1, 1);
+      }
+      edgeShade(c);
+      break;
+    }
+    case SKY_SPIRE: {
+      noiseFill(c, ["#ffe9b0", "#f4d892", "#fff2c8", "#e2c274", "#f8e0a0", "#ecd094"], seed);
+      // glowing rune
+      c.strokeStyle = "rgba(255,255,255,0.75)";
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(5, 4);
+      c.lineTo(10, 4);
+      c.lineTo(8, 8);
+      c.lineTo(11, 12);
+      c.moveTo(5, 8);
+      c.lineTo(10, 8);
+      c.moveTo(5, 12);
+      c.lineTo(8, 12);
+      c.stroke();
+      c.fillStyle = "rgba(255,240,190,0.35)";
+      c.fillRect(0, 0, TEX, 2);
+      edgeShade(c);
       break;
     }
     default:

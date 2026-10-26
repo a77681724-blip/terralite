@@ -24,6 +24,10 @@ export const WATER = 18;
 // Chapter II interactables
 export const SHARD = 22;
 export const HOLLOW_GATE = 23;
+// Chapter II — the Skyhold
+export const CLOUD = 24;
+export const CLOUDSTONE = 25;
+export const SKY_SPIRE = 26;
 
 export const TILE = 32; // 16px pixel-art source * 2 = crisp retro scaling
 export const WORLD_W = 480;
@@ -67,6 +71,9 @@ TILES[PORTAL] = { name: "Portal", solid: false, color: "#9b59b6", shade: "#6c348
 TILES[WATER] = { name: "Water", solid: false, color: "#3366cc", shade: "#1a3d8a", minTier: 99, hp: 9999 };
 TILES[SHARD] = { name: "Memory Shard", solid: false, color: "#8ff0ff", shade: "#3aa6c8", light: 11, minTier: 99, hp: 9999, bg: true };
 TILES[HOLLOW_GATE] = { name: "Hollow Gate", solid: false, color: "#241a33", shade: "#0b0712", light: 7, minTier: 99, hp: 9999, bg: true };
+TILES[CLOUD] = { name: "Cloud", solid: true, color: "#e8f6ff", shade: "#b4d6ec", minTier: 3, hp: 10, drop: "cloud" };
+TILES[CLOUDSTONE] = { name: "Cloudstone", solid: true, color: "#c3d9ea", shade: "#8aabc4", minTier: 3, hp: 16, drop: "cloudstone" };
+TILES[SKY_SPIRE] = { name: "Sky Spire", solid: true, color: "#ffe9b0", shade: "#d6b46a", light: 4, minTier: 99, hp: 9999 };
 
 function TilesGold(id: number, name: string, drop: string, speckle: string, hp: number, tier: number) {
   TILES[id] = { name, solid: true, color: "#8a8f9c", shade: "#5c606c", minTier: tier, hp, drop, speckle };
@@ -104,6 +111,8 @@ export const ITEMS: Record<string, ItemDef> = {
   plank: { name: "Planks", place: PLANK, max: 99, kind: "material", color: "#b07a43", icon: "🟧" },
   glass: { name: "Glass", place: GLASS, max: 99, kind: "material", color: "#bfe6ef", icon: "🔷" },
   torch: { name: "Torch", place: TORCH, max: 99, kind: "material", color: "#ffcf6b", icon: "🔥", desc: "Emits light" },
+  cloud: { name: "Cloud Block", place: CLOUD, max: 99, kind: "material", color: "#e8f6ff", icon: "☁️", desc: "Places a block of sky" },
+  cloudstone: { name: "Cloudstone", place: CLOUDSTONE, max: 99, kind: "material", color: "#c3d9ea", icon: "🧊", desc: "Places pale sky stone" },
   apple: { name: "Apple", max: 99, kind: "material", color: "#e23b3b", icon: "🍎", desc: "Eat to heal 25 HP" },
   gel: { name: "Slime Gel", max: 99, kind: "material", color: "#6fe06f", icon: "🟢", desc: "Dropped by slimes" },
   copper_bar: { name: "Copper Bar", max: 99, kind: "material", color: "#d4823a", icon: "🟤" },
@@ -115,7 +124,7 @@ export const ITEMS: Record<string, ItemDef> = {
   // tools
   wood_pickaxe: { name: "Wooden Pickaxe", kind: "tool", tool: "pickaxe", tier: 1, power: 2, dmg: 4, color: "#b07a43", icon: "⛏️", desc: "Mines stone, coal & copper" },
   stone_pickaxe: { name: "Stone Pickaxe", kind: "tool", tool: "pickaxe", tier: 2, power: 4, dmg: 6, color: "#8a8f9c", icon: "⛏️", desc: "Mines iron & gold" },
-  iron_pickaxe: { name: "Iron Pickaxe", kind: "tool", tool: "pickaxe", tier: 3, power: 7, dmg: 9, color: "#cfd6df", icon: "⛏️", desc: "Mines diamond — the strongest" },
+  iron_pickaxe: { name: "Iron Pickaxe", kind: "tool", tool: "pickaxe", tier: 3, power: 7, dmg: 9, color: "#cfd6df", icon: "⛏️", desc: "Mines diamond & sky blocks" },
   wood_sword: { name: "Wooden Sword", kind: "tool", tool: "sword", dmg: 9, color: "#b07a43", icon: "🗡️" },
   stone_sword: { name: "Stone Sword", kind: "tool", tool: "sword", dmg: 14, color: "#8a8f9c", icon: "🗡️" },
   copper_sword: { name: "Copper Sword", kind: "tool", tool: "sword", dmg: 18, color: "#d4823a", icon: "⚔️" },
@@ -123,6 +132,9 @@ export const ITEMS: Record<string, ItemDef> = {
   gold_sword: { name: "Gold Sword", kind: "tool", tool: "sword", dmg: 34, color: "#ffd23b", icon: "⚔️" },
   wood_axe: { name: "Wooden Axe", kind: "tool", tool: "axe", power: 3, dmg: 5, color: "#b07a43", icon: "🪓", desc: "Fells trees faster" },
   crown: { name: "Slime Crown", kind: "material", color: "#6fe06f", icon: "👑", desc: "Summons the Slime King at night" },
+  // Chapter II
+  essence: { name: "Storm Essence", max: 99, kind: "material", color: "#8fe8ff", icon: "✨", desc: "Torn from sky wisps" },
+  skyblade: { name: "Skyforged Blade", kind: "tool", tool: "sword", dmg: 44, color: "#8fe8ff", icon: "⚔️", desc: "Light enough to cut the wind" },
 };
 
 // ---- Recipes ----
@@ -153,6 +165,7 @@ export const RECIPES: Recipe[] = [
   { id: "gold_sword", out: "gold_sword", outCount: 1, station: "workbench", ing: [{ id: "gold_bar", n: 10 }, { id: "wood", n: 2 }] },
   { id: "iron_pickaxe", out: "iron_pickaxe", outCount: 1, station: "workbench", ing: [{ id: "iron_bar", n: 12 }, { id: "wood", n: 3 }] },
   { id: "crown", out: "crown", outCount: 1, station: "workbench", ing: [{ id: "gel", n: 30 }, { id: "gold_bar", n: 3 }] },
+  { id: "skyblade", out: "skyblade", outCount: 1, station: "none", ing: [{ id: "essence", n: 8 }] },
 ];
 
 // ---- World object ----
@@ -325,6 +338,185 @@ export function generateWorld(seed?: number): World {
   w.spawnX = Math.floor(w.w / 2);
   w.spawnY = w.surfaceY[w.spawnX] - 4;
   return w;
+}
+
+// ---- Chapter II: the Skyhold ----
+export interface SkyIslandDef {
+  x: number;
+  top: number;
+  halfW: number;
+  body: number;
+}
+
+export interface SkyLayout {
+  islands: SkyIslandDef[];
+  /** Side isles: the fallen archive and the last camp. */
+  sideIslands: SkyIslandDef[];
+  arrival: { x: number; y: number };
+  shards: { x: number; y: number }[];
+  summit: { x: number; y: number };
+  mira: { x: number; y: number };
+  /** Chapter II quest objects — positions are air tiles (not solid). */
+  motes: { x: number; y: number }[];
+  shrines: { x: number; y: number }[];
+  sigil: { x: number; y: number };
+  bell: { x: number; y: number };
+  coins: { x: number; y: number }[];
+  pages: { x: number; y: number }[];
+  chimes: { x: number; y: number }[];
+  toll: { x: number; y: number };
+  archive: { x: number; y: number };
+  camp: { x: number; y: number };
+  witness: { x: number; y: number }[];
+}
+
+/** Fixed sky-archipelago layout, anchored to the middle of the world. */
+export function skyLayout(w: World): SkyLayout {
+  const cx = Math.floor(w.w / 2);
+  const islands: SkyIslandDef[] = [
+    { x: cx, top: 28, halfW: 9, body: 6 },
+    { x: cx + 28, top: 24, halfW: 6, body: 5 },
+    { x: cx + 54, top: 19, halfW: 6, body: 5 },
+    { x: cx + 79, top: 15, halfW: 6, body: 5 },
+    { x: cx + 106, top: 9, halfW: 9, body: 7 },
+  ];
+  const shards = [1, 2, 3].map((i) => ({ x: islands[i].x, y: islands[i].top - 2 }));
+  const summit = { x: islands[4].x + 2, y: islands[4].top - 7 };
+  const sideIslands: SkyIslandDef[] = [
+    { x: cx - 27, top: 31, halfW: 6, body: 5 },
+    { x: cx + 132, top: 14, halfW: 6, body: 5 },
+  ];
+  const archive = { x: sideIslands[0].x, y: sideIslands[0].top - 2 };
+  const camp = { x: sideIslands[1].x, y: sideIslands[1].top - 2 };
+  return {
+    islands,
+    sideIslands,
+    arrival: { x: islands[0].x, y: islands[0].top },
+    shards,
+    summit,
+    mira: { x: summit.x + 3, y: summit.y },
+    motes: [
+      { x: islands[1].x - 3, y: islands[1].top - 2 },
+      { x: islands[2].x + 3, y: islands[2].top - 2 },
+      { x: islands[3].x - 3, y: islands[3].top - 2 },
+    ],
+    shrines: [
+      { x: islands[1].x + 3, y: islands[1].top - 1 },
+      { x: islands[2].x - 3, y: islands[2].top - 1 },
+      { x: islands[3].x + 3, y: islands[3].top - 1 },
+    ],
+    sigil: { x: islands[3].x - 5, y: islands[3].top - 2 },
+    bell: { x: islands[4].x - 7, y: islands[4].top - 2 },
+    coins: [
+      { x: islands[0].x + 4, y: islands[0].top - 2 },
+      { x: islands[2].x + 6, y: islands[2].top - 2 },
+      { x: islands[3].x + 6, y: islands[3].top - 2 },
+      { x: islands[1].x - 6, y: islands[1].top - 2 },
+      { x: sideIslands[1].x - 3, y: sideIslands[1].top - 2 },
+    ],
+    pages: [
+      { x: sideIslands[0].x - 5, y: sideIslands[0].top - 2 },
+      { x: sideIslands[0].x, y: sideIslands[0].top - 2 },
+      { x: sideIslands[0].x + 5, y: sideIslands[0].top - 2 },
+    ],
+    chimes: [
+      { x: islands[0].x, y: islands[0].top - 2 },
+      { x: islands[3].x - 1, y: islands[3].top - 2 },
+      { x: sideIslands[1].x + 4, y: sideIslands[1].top - 2 },
+    ],
+    toll: { x: islands[1].x, y: islands[1].top - 1 },
+    archive,
+    camp,
+    witness: [
+      { x: islands[0].x - 6, y: islands[0].top - 2 },
+      { x: islands[1].x + 6, y: islands[1].top - 2 },
+      { x: islands[2].x - 6, y: islands[2].top - 2 },
+      { x: islands[4].x + 6, y: islands[4].top - 2 },
+    ],
+  };
+}
+
+/**
+ * Carve the floating archipelago into an existing world. Safe to call again:
+ * the layout is deterministic, so it simply restores the intended shape.
+ */
+export function buildSkyRealm(w: World): SkyLayout {
+  const layout = skyLayout(w);
+
+  const clear = (x0: number, x1: number, y0: number, y1: number) => {
+    for (let x = Math.max(0, x0); x <= Math.min(w.w - 1, x1); x++) {
+      for (let y = Math.max(0, y0); y <= Math.min(w.h - 1, y1); y++) {
+        if (getTile(w, x, y) !== PORTAL) setTile(w, x, y, AIR);
+      }
+    }
+  };
+
+  // Clear every footprint first so later shapes never cut through each other.
+  for (const isl of layout.islands) {
+    clear(isl.x - isl.halfW - 2, isl.x + isl.halfW + 2, isl.top - 5, isl.top + isl.body + 3);
+  }
+  for (const isl of layout.sideIslands) {
+    clear(isl.x - isl.halfW - 2, isl.x + isl.halfW + 2, isl.top - 5, isl.top + isl.body + 3);
+  }
+  const bridgePairs: { a: SkyIslandDef; b: SkyIslandDef }[] = [];
+  for (let i = 0; i < layout.islands.length - 1; i++) {
+    bridgePairs.push({ a: layout.islands[i], b: layout.islands[i + 1] });
+  }
+  bridgePairs.push({ a: layout.sideIslands[0], b: layout.islands[0] });
+  bridgePairs.push({ a: layout.islands[4], b: layout.sideIslands[1] });
+  for (const { a, b } of bridgePairs) {
+    const x0 = a.x + a.halfW + 2;
+    const x1 = b.x - b.halfW - 3;
+    clear(x0 - 2, x1 + 4, Math.min(a.top, b.top) - 3, Math.max(a.top, b.top) + 3);
+  }
+  const top = layout.islands[layout.islands.length - 1];
+  clear(top.x - 10, top.x + 9, layout.summit.y - 5, top.top + 2);
+
+  for (const isl of [...layout.islands, ...layout.sideIslands]) {
+    for (let dx = -isl.halfW; dx <= isl.halfW; dx++) {
+      const edge = Math.abs(dx) / isl.halfW;
+      const depth = 1 + Math.round((1 - edge * edge) * isl.body);
+      const x = isl.x + dx;
+      setTile(w, x, isl.top, CLOUD);
+      setTile(w, x, isl.top + 1, CLOUD);
+      for (let dy = 2; dy <= depth; dy++) setTile(w, x, isl.top + dy, CLOUDSTONE);
+      if (edge > 0.7 && depth > 2) setTile(w, x, isl.top + depth + 1, CLOUD);
+    }
+  }
+
+  // Cloud bridges: overlapping pads with at most a two-tile rise per step and
+  // gaps no wider than one tile, so the whole path is jumpable.
+  for (const { a, b } of bridgePairs) {
+    const x0 = a.x + a.halfW + 2;
+    const last = b.x - b.halfW - 3;
+    const rise = Math.abs(b.top - a.top);
+    const pads = Math.max(2, Math.ceil(rise / 2) + 1);
+    for (let k = 0; k < pads; k++) {
+      const x = Math.round(x0 + ((last - x0) * k) / (pads - 1));
+      const y = Math.round(a.top + ((b.top - a.top) * k) / (pads - 1));
+      for (let dx = 0; dx < 3; dx++) {
+        setTile(w, x + dx, y, CLOUD);
+        setTile(w, x + dx, y + 1, CLOUD);
+      }
+      if (k % 3 === 1) setTile(w, x + 1, y + 2, CLOUDSTONE);
+    }
+  }
+
+  // Stair of pale stone leading to the highest point.
+  for (let s = 0; s < 7; s++) {
+    const sx = top.x - 6 + s;
+    const sy = top.top - 1 - s;
+    setTile(w, sx, sy, CLOUD);
+    setTile(w, sx + 1, sy, CLOUD);
+    setTile(w, sx, sy + 1, CLOUDSTONE);
+    setTile(w, sx + 1, sy + 1, CLOUDSTONE);
+  }
+  const altarY = layout.summit.y;
+  for (let dx = -1; dx <= 6; dx++) {
+    setTile(w, top.x + dx, altarY, SKY_SPIRE);
+    setTile(w, top.x + dx, altarY + 1, SKY_SPIRE);
+  }
+  return layout;
 }
 
 function placeVein(w: World, x: number, y: number, id: number, size: number, rand: () => number) {

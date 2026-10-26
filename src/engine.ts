@@ -3,14 +3,16 @@
 
 import {
   AIR, STONE, WOOD, LEAVES, COPPER, IRON, TORCH, WORKBENCH, FURNACE, PORTAL,
-  BEDROCK, SHARD, HOLLOW_GATE,
+  BEDROCK, SHARD, HOLLOW_GATE, SKY_SPIRE,
   TILE, TILES, isSolid, ITEMS, RECIPES, generateWorld, getTile, setTile,
-  type World, type Recipe,
+  buildSkyRealm, skyLayout,
+  type World, type Recipe, type SkyLayout,
 } from "./world";
 import { audio } from "./audio";
 import { initSprites, getSprite } from "./sprites";
 import { tileTexture, wallTexture, TEX } from "./pixart";
-import { SECRET_TRUST } from "./story";
+import { CHAPTER2_ENDING, SECRET_TRUST } from "./story";
+import { t, tQuest } from "./i18n";
 import skyUrl from "./assets/bg_sky.jpg";
 
 const REACH = 5; // tiles
@@ -72,6 +74,10 @@ export interface EngineState {
   shardsFound: number;
   ending: string | null;
   story: string | null;
+  /** Waypoint to the toll gate while Chapter II's XXI quest is active. */
+  c2Track: { x: number; y: number; dist: number; coins: number; total: number } | null;
+  /** Standing next to a Chapter II chime that is still waiting to be rung. */
+  nearChime: boolean;
 }
 export interface EngineCallbacks {
   onState: (s: EngineState) => void;
@@ -81,7 +87,7 @@ export interface EngineCallbacks {
 }
 
 interface Enemy {
-  type: "slime" | "zombie" | "bat" | "king";
+  type: "slime" | "zombie" | "bat" | "king" | "wisp" | "herald" | "auditor" | "storm";
   x: number; y: number; vx: number; vy: number;
   w: number; h: number; hp: number; maxHp: number;
   facing: number; onGround: boolean; hopT: number; hitFlash: number; t: number;
@@ -91,6 +97,36 @@ interface Particle { x: number; y: number; vx: number; vy: number; life: number;
 interface FloatText { x: number; y: number; vy: number; life: number; text: string; color: string; }
 
 interface QuestDef { title: string; text: string; done: string; reward: string; }
+
+// Chapter II quest slots. Keep these as constants: story triggers, shard
+// spawning and the summit check all key off them.
+const C2_START = 11;
+const C2_CLOUDPATH = 11;
+const C2_FEED = 12;
+const C2_MOTES = 13;
+const C2_NAME = 14;
+const C2_WISPS = 15;
+const C2_ESSENCE = 16;
+const C2_BLADE = 17;
+const C2_SHRINES = 18;
+const C2_SHARD1 = 19;
+const C2_TOLL = 20;
+const C2_SIGIL = 21;
+const C2_AUDITOR = 22;
+const C2_UNDERSKY = 23;
+const C2_CHIMES = 24;
+const C2_SHARD2 = 25;
+const C2_SIEGE = 26;
+const C2_HERALD = 27;
+const C2_TRUST = 28;
+const C2_SHARD3 = 29;
+const C2_STORM = 30;
+const C2_WITNESS = 31;
+const C2_CONFESSION = 32;
+const C2_BELL = 33;
+const C2_LAST = 34;
+
+const CHIME_ORDER = [1, 2, 0];
 
 const QUESTS: QuestDef[] = [
   { title: "I — A New World", text: "Chop trees and gather 12 Wood", done: "You feel the spark of survival.", reward: "+1 Torch" },
@@ -104,12 +140,31 @@ const QUESTS: QuestDef[] = [
   { title: "IX — Armed & Ready", text: "Craft an Iron Sword", done: "You are ready to face the night.", reward: "+20 Max HP" },
   { title: "X — The Slime Crown", text: "Craft a Slime Crown", done: "It pulses with the King's hunger.", reward: "Boss summon ready" },
   { title: "XI — King of Slimes", text: "Use the Crown at night & slay the King", done: "The realm is yours!", reward: "VICTORY" },
-  // Chapter II — The Debt of Light
-  { title: "XII — Last of the Line", text: "Feed the last slime 5 gel", done: "It remembers the sky.", reward: "The heir survives" },
-  { title: "XIII — The Ledger I", text: "Touch the first memory shard", done: "The First Warden's signature.", reward: "Memory I" },
-  { title: "XIV — The Ledger II", text: "Touch the second memory shard", done: "A payment plan made of light.", reward: "Memory II" },
-  { title: "XV — The Ledger III", text: "Touch the third memory shard", done: "The Order's lie is exposed.", reward: "Memory III" },
-  { title: "XVI — The Vigil", text: "Approach the Hollow Gate", done: "The debt is called.", reward: "The final choice" },
+  // Chapter II — The Skyhold
+  { title: "XII — The Cloudpath", text: "Cross the cloud path to the far island", done: "The sky opens its ledger.", reward: "+20 Max HP" },
+  { title: "XIII — The Hungry Heir", text: "Feed the slime heir 5 Slime Gel", done: "It remembers every drop.", reward: "+5 Gel" },
+  { title: "XIV — Motes of the Fallen Sky", text: "Collect 3 skylight motes above the islands", done: "The sky's loose light gathers in your pack.", reward: "+10 Max HP" },
+  { title: "XV — A Name for the Heavy", text: "Feed Pell 3 more Slime Gel (8 total)", done: "The heir has a name — and a voice.", reward: "+10 Max HP" },
+  { title: "XVI — Wings in the Static", text: "Defeat 5 sky wisps", done: "The static goes quiet.", reward: "+5 Gel" },
+  { title: "XVII — Storm Essence", text: "Gather 8 Storm Essence", done: "Bottled lightning hums against your ribs.", reward: "+6 Torches" },
+  { title: "XVIII — The Skyforged Edge", text: "Craft the Skyforged Blade (8 essence)", done: "The blade weighs less than a promise.", reward: "+20 Max HP" },
+  { title: "XIX — The Lantern Shrines", text: "Light the three lantern shrines with torches", done: "Three small suns hold the clouds together.", reward: "+10 Max HP" },
+  { title: "XX — The Ledger I", text: "Touch the first memory shard", done: "The First Warden's signature.", reward: "+10 Max HP" },
+  { title: "XXI — The Toll Road", text: "Collect 5 sky coins, then pay at the toll gate on the second isle — follow the gold marker", done: "The Collector accepts names, not coin.", reward: "+10 Max HP" },
+  { title: "XXII — The Warden's Sigil", text: "Recover the Warden's sigil from the fourth isle", done: "The seal still remembers your hand.", reward: "+5 Gel" },
+  { title: "XXIII — The Auditor", text: "Defeat the Auditor", done: "The arithmetic of the sky is torn.", reward: "+20 Max HP" },
+  { title: "XXIV — The Undersky", text: "Recover 3 pages from the archive island", done: "The Order's lie is written in its own hand.", reward: "+10 Max HP" },
+  { title: "XXV — The Hymn of Return", text: "Ring the chimes in the order II → III → I", done: "The sky remembers the song.", reward: "+10 Max HP" },
+  { title: "XXVI — The Ledger II", text: "Touch the second memory shard", done: "A payment plan made of light.", reward: "+10 Max HP" },
+  { title: "XXVII — The Choir of Interest", text: "Survive 45 seconds at the archive", done: "The interest is paid in static.", reward: "+20 Max HP" },
+  { title: "XXVIII — The Hollow Herald", text: "Defeat the Hollow Herald", done: "The Collector loses its voice.", reward: "+10 Gel" },
+  { title: "XXIX — A Heavier Crown", text: "Raise the heir's trust to 15 Slime Gel", done: "It is heavy enough to wear a crown.", reward: "+20 Max HP" },
+  { title: "XXX — The Ledger III", text: "Touch the third memory shard", done: "The Order's lie is exposed.", reward: "+10 Max HP" },
+  { title: "XXXI — The Stormfather", text: "Defeat the Stormfather at the last camp", done: "The First Warden's apology breaks.", reward: "+20 Max HP" },
+  { title: "XXXII — The Witness Stones", text: "Touch the four witness stones on the climb", done: "Four names, one blank stone.", reward: "+10 Max HP" },
+  { title: "XXXIII — Mira's Confession", text: "Meet Mira at the last camp before the bell", done: "You know which ending she is writing.", reward: "+10 Max HP" },
+  { title: "XXXIV — The Silent Bell", text: "Ring the silent bell at the summit isle", done: "The bell rings once — and the sky answers.", reward: "+10 Gel" },
+  { title: "XXXV — The Last Step", text: "Climb to the summit where Mira waits", done: "The sky is ready to fall.", reward: "The fall" },
 ];
 
 export class Engine {
@@ -204,9 +259,36 @@ export class Engine {
   // Chapter II — The Debt of Light
   private c2Active = false;
   private c2Seen = false;
+  private c2Act2Seen = false;
+  private c2Act3Seen = false;
   private c2Ending: string | null = null;
   private heirFed = 0;
   private shardsFound = 0;
+  private moteBits = 0;
+  private sigilFound = false;
+  private bellRung = false;
+  private wispsKilled = 0;
+  private heraldDefeated = false;
+  private c2NameSeen = false;
+  private coinBits = 0;
+  private tollPaid = false;
+  private auditorIntroSeen = false;
+  private auditorDefeated = false;
+  private pageBits = 0;
+  private chimeBits = 0;
+  private chimeStep = 0;
+  private chimeHover = -1;
+  private siegeIntroSeen = false;
+  private siegeActive = false;
+  private siegeT = 0;
+  private siegeSpawnT = 0;
+  private siegeDone = false;
+  private heraldIntroSeen = false;
+  private stormIntroSeen = false;
+  private stormDefeated = false;
+  private witnessBits = 0;
+  private confessionSeen = false;
+  private c2TrustSeen = false;
   private storyId: string | null = null;
   private shardPos: { x: number; y: number; idx: number } | null = null;
   private gatePos: { x: number; y: number } | null = null;
@@ -214,6 +296,8 @@ export class Engine {
   private heirY = 0;
   private heirHop = 0;
   private portalMsgCd = 0;
+  private sky: SkyLayout | null = null;
+  private flashT = 0;
 
   private stateT = 0;
   private frame = 0;
@@ -303,8 +387,8 @@ export class Engine {
     audio.setTrack("day");
     this.running = true;
     this.last = performance.now();
-    this.showBanner(loaded ? "Welcome back" : QUESTS[0].title, loaded ? `Day ${this.dayCount} · auto-saved` : "Welcome, survivor");
-    this.ensureC2Objects();
+    this.showBanner(loaded ? t("welcome_back") : tQuest(0).title, loaded ? `${t("day")} ${this.dayCount} · ${t("auto_saved")}` : t("welcome_survivor"));
+    this.prepareChapter2();
     if (this.c2Active && !this.c2Seen) {
       this.triggerStory("c2_intro");
       this.saveGame();
@@ -370,6 +454,51 @@ export class Engine {
     return this.placeMode;
   }
   getPlaceMode(): boolean { return this.placeMode; }
+
+  /**
+   * Rings the chime the player is standing next to. Chimes only sound on an
+   * explicit action (right-click or the mobile button), never on proximity.
+   */
+  ringNearbyChime(): boolean {
+    if (this.questIndex !== C2_CHIMES || this.chimeStep >= CHIME_ORDER.length) return false;
+    const near = this.chimeInReach();
+    if (near < 0) return false;
+    const l = this.sky ?? skyLayout(this.world);
+    const cx = (l.chimes[near].x + 0.5) * TILE;
+    const cy = (l.chimes[near].y + 0.5) * TILE;
+    // Already rung — ignore, so a stray click while standing beside a chime
+    // that just sounded cannot wipe the sequence.
+    if (this.chimeBits & (1 << near)) return true;
+    if (near === CHIME_ORDER[this.chimeStep]) {
+      this.chimeBits |= 1 << near;
+      this.chimeStep++;
+      audio.playSfx("levelup");
+      for (let k = 0; k < 10; k++) this.dust(cx, cy, "#bff3ff");
+      this.showBanner("THE HYMN OF RETURN", `${this.chimeStep} / ${CHIME_ORDER.length}`);
+      if (this.chimeStep >= CHIME_ORDER.length) {
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.8, max: 0.8, size: 140, color: "rgba(190,243,255,0.9)", grav: 0, ring: true });
+        this.triggerStory("c2_chimes");
+      }
+      this.saveGame();
+    } else {
+      this.chimeBits = 0;
+      this.chimeStep = 0;
+      audio.playSfx("hurt");
+      for (let k = 0; k < 8; k++) this.dust(cx, cy, "#ff8b8b");
+      this.showBanner("DISCORD", "The chimes fall silent — begin again");
+      this.saveGame();
+    }
+    return true;
+  }
+
+  private chimeInReach(): number {
+    const l = this.sky ?? skyLayout(this.world);
+    for (let i = 0; i < l.chimes.length; i++) {
+      const c = l.chimes[i];
+      if (this.nearTile(c.x, c.y, 2.4)) return i;
+    }
+    return -1;
+  }
 
   // ---------- public API for UI ----------
   getWorldForMinimap(): { w: number; h: number; tiles: Uint8Array } | null {
@@ -622,8 +751,8 @@ export class Engine {
     audio.setTrack("day");
     this.running = true;
     this.last = performance.now();
-    this.showBanner(loaded ? "Welcome back" : QUESTS[0].title, loaded ? `Day ${this.dayCount} · auto-saved` : "Welcome, survivor");
-    this.ensureC2Objects();
+    this.showBanner(loaded ? t("welcome_back") : tQuest(0).title, loaded ? `${t("day")} ${this.dayCount} · ${t("auto_saved")}` : t("welcome_survivor"));
+    this.prepareChapter2();
     if (this.c2Active && !this.c2Seen) {
       this.triggerStory("c2_intro");
       this.saveGame();
@@ -636,6 +765,14 @@ export class Engine {
     this.victory = false;
     this.gameover = false;
     this.hp = Math.max(this.hp, this.maxHp);
+    if (this.c2Ending) {
+      // The fall is the ending. Continuing must not leave the player standing
+      // on the summit where Mira waits, so wake them up back on the ground.
+      this.returnToGround();
+      this.showBanner(t("aft_hut_title"), t("aft_hut_sub"));
+      this.saveGame();
+      this.pushState();
+    }
     this.last = performance.now();
   }
 
@@ -665,9 +802,36 @@ export class Engine {
     this.shakeY = 0;
     this.c2Active = false;
     this.c2Seen = false;
+    this.c2Act2Seen = false;
+    this.c2Act3Seen = false;
     this.c2Ending = null;
     this.heirFed = 0;
     this.shardsFound = 0;
+    this.moteBits = 0;
+    this.sigilFound = false;
+    this.bellRung = false;
+    this.wispsKilled = 0;
+    this.heraldDefeated = false;
+    this.c2NameSeen = false;
+    this.coinBits = 0;
+    this.tollPaid = false;
+    this.auditorIntroSeen = false;
+    this.auditorDefeated = false;
+    this.pageBits = 0;
+    this.chimeBits = 0;
+    this.chimeStep = 0;
+    this.chimeHover = -1;
+    this.siegeIntroSeen = false;
+    this.siegeActive = false;
+    this.siegeT = 0;
+    this.siegeSpawnT = 0;
+    this.siegeDone = false;
+    this.heraldIntroSeen = false;
+    this.stormIntroSeen = false;
+    this.stormDefeated = false;
+    this.witnessBits = 0;
+    this.confessionSeen = false;
+    this.c2TrustSeen = false;
     this.storyId = null;
     this.shardPos = null;
     this.gatePos = null;
@@ -678,7 +842,7 @@ export class Engine {
     this.saveCounter = (this.saveCounter + 1) % 100000;
     try {
       const data = {
-        v: 2,
+        v: 4,
         tiles: u8ToB64(this.world.tiles),
         surfaceY: Array.from(this.world.surfaceY),
         w: this.world.w,
@@ -706,11 +870,34 @@ export class Engine {
         c2: {
           active: this.c2Active,
           seen: this.c2Seen,
+          act2: this.c2Act2Seen,
+          act3: this.c2Act3Seen,
           ending: this.c2Ending,
           heirFed: this.heirFed,
           shards: this.shardsFound,
           shard: this.shardPos,
           gate: this.gatePos,
+          motes: this.moteBits,
+          sigil: this.sigilFound,
+          bell: this.bellRung,
+          wisps: this.wispsKilled,
+          herald: this.heraldDefeated,
+          nameSeen: this.c2NameSeen,
+          coins: this.coinBits,
+          toll: this.tollPaid,
+          auditorIntro: this.auditorIntroSeen,
+          auditor: this.auditorDefeated,
+          pages: this.pageBits,
+          chimes: this.chimeBits,
+          chimeStep: this.chimeStep,
+          siegeIntro: this.siegeIntroSeen,
+          siege: this.siegeDone,
+          heraldIntro: this.heraldIntroSeen,
+          stormIntro: this.stormIntroSeen,
+          storm: this.stormDefeated,
+          witness: this.witnessBits,
+          confession: this.confessionSeen,
+          trustSeen: this.c2TrustSeen,
         },
       };
       localStorage.setItem(this.saveKey(), JSON.stringify(data));
@@ -760,43 +947,154 @@ export class Engine {
     const c2 = d.c2 ?? null;
     this.c2Active = !!c2?.active;
     this.c2Seen = !!c2?.seen;
+    this.c2Act2Seen = !!c2?.act2;
+    this.c2Act3Seen = !!c2?.act3;
     this.c2Ending = c2?.ending ?? null;
     this.heirFed = c2?.heirFed ?? 0;
     this.shardsFound = c2?.shards ?? 0;
     this.shardPos = c2?.shard ?? null;
     this.gatePos = c2?.gate ?? null;
+    this.moteBits = c2?.motes ?? 0;
+    this.sigilFound = !!c2?.sigil;
+    this.bellRung = !!c2?.bell;
+    this.wispsKilled = c2?.wisps ?? 0;
+    this.heraldDefeated = !!c2?.herald;
+    this.c2NameSeen = !!c2?.nameSeen;
+    this.coinBits = c2?.coins ?? 0;
+    this.tollPaid = !!c2?.toll;
+    this.auditorIntroSeen = !!c2?.auditorIntro;
+    this.auditorDefeated = !!c2?.auditor;
+    this.pageBits = c2?.pages ?? 0;
+    this.chimeBits = c2?.chimes ?? 0;
+    this.chimeStep = Math.max(0, Math.min(3, c2?.chimeStep ?? 0));
+    this.chimeHover = -1;
+    this.siegeIntroSeen = !!c2?.siegeIntro;
+    this.siegeDone = !!c2?.siege;
+    this.siegeActive = false;
+    this.siegeT = 0;
+    this.siegeSpawnT = 0;
+    this.heraldIntroSeen = !!c2?.heraldIntro;
+    this.stormIntroSeen = !!c2?.stormIntro;
+    this.stormDefeated = !!c2?.storm;
+    this.witnessBits = c2?.witness ?? 0;
+    this.confessionSeen = !!c2?.confession;
+    this.c2TrustSeen = !!c2?.trustSeen;
     this.storyId = null;
-    // Legacy chapter-I victory saves roll straight into Chapter II.
-    if ((d.victory ?? false) && !this.c2Active && !this.c2Ending) {
+    this.sky = null;
+    // Chapter II is unlocked by the King's death, not only by the legacy
+    // `victory` flag: older builds cleared that flag on "continue in world",
+    // which left such saves stuck on a dead Chapter-I quest index.
+    const chapterOneDone = !!(d.kingDefeated || d.victory || (d.questIndex ?? 0) >= 11);
+    if (chapterOneDone && !this.c2Active && !this.c2Ending) {
       this.c2Active = true;
       this.c2Seen = false;
       this.kingDefeated = true;
-      this.questIndex = Math.max(this.questIndex, 11);
+      this.questIndex = 11;
     }
-    // Older builds stored questIndex = QUESTS.length on Chapter I victory.
-    // Now that the Chapter II quests live in the same list, such a value
-    // points past them and the HUD would claim everything is complete.
+    const saveV = d.v ?? 1;
     if (this.c2Active && !this.c2Ending) {
-      const expected = 11 + (this.heirFed >= 5 ? 1 : 0) + Math.min(this.shardsFound, 3);
-      if (this.questIndex < 11 || this.questIndex >= QUESTS.length) {
-        this.questIndex = expected;
-        // A gate spawned from the derailed index would be a second, dead gate.
-        if (this.gatePos && expected < 15) {
-          this.clearGateAt(this.gatePos);
-          this.gatePos = null;
-        }
+      this.kingDefeated = true;
+      if (saveV < 3) {
+        // Chapter II used to be five beats long. Older saves restart the new
+        // chain at the heir (or at the Cloudpath) without losing trust.
+        this.c2Act2Seen = false;
+        this.shardsFound = 0;
+        this.moteBits = 0;
+        this.sigilFound = false;
+        this.bellRung = false;
+        this.wispsKilled = 0;
+        this.heraldDefeated = false;
+        this.resetNewC2Progress();
+        this.questIndex = (d.questIndex ?? 0) >= C2_FEED ? C2_FEED : C2_START;
+      } else if (saveV < 4) {
+        // The chain grew from 15 to 24 Chapter-II quests. v3 saves keep their
+        // place by mapping the old slot onto the equivalent new one.
+        const old = d.questIndex ?? C2_START;
+        const map: Record<number, number> = {
+          11: C2_CLOUDPATH, 12: C2_FEED, 13: C2_MOTES, 14: C2_WISPS, 15: C2_ESSENCE,
+          16: C2_BLADE, 17: C2_SHRINES, 18: C2_SHARD1, 19: C2_SIGIL, 20: C2_SHARD2,
+          21: C2_HERALD, 22: C2_TRUST, 23: C2_SHARD3, 24: C2_BELL, 25: C2_LAST,
+        };
+        this.questIndex = old >= 26 ? C2_LAST : map[old] ?? C2_START;
+        this.resetNewC2Progress();
       }
+      if (this.questIndex < C2_START || this.questIndex > C2_LAST) this.questIndex = C2_START;
+      // Legacy Chapter-II saves placed shards and the gate on the ground.
+      // The chapter now lives in the clouds, so discard those leftovers.
+      if (this.shardPos) {
+        setTile(this.world, this.shardPos.x, this.shardPos.y, AIR);
+        this.shardPos = null;
+      }
+      if (this.gatePos) {
+        this.clearGateAt(this.gatePos);
+        this.gatePos = null;
+      }
+      // Older saves may have spent all their gel before the heir quest;
+      // the sky has no slimes to farm, so guarantee the opening feedings.
+      if (this.questIndex <= C2_FEED && this.count("gel") < 5) {
+        this.addItem("gel", 5 - this.count("gel"));
+      }
+    }
+    // The chapter is over: wake up on the ground instead of the summit. The
+    // finale already played, so it must not throw the player off again.
+    if (this.c2Ending) {
+      this.questIndex = QUESTS.length;
+      this.c2Seen = true;
+      this.returnToGround();
     }
     // Endings are shown live; loading an ended world keeps it playable.
     this.victory = false;
-    if (this.shardPos && getTile(this.world, this.shardPos.x, this.shardPos.y) !== SHARD) this.shardPos = null;
-    if (this.gatePos && getTile(this.world, this.gatePos.x, this.gatePos.y) !== HOLLOW_GATE) this.gatePos = null;
     this.heirX = this.px + 34;
     this.heirY = this.py;
     console.log("Loaded world", this.currentWorldId, "questIndex:", this.questIndex, "chapter2:", this.c2Active);
     this.fallDistance = 0;
     this.shakeX = 0;
     this.shakeY = 0;
+  }
+
+  /** New Chapter-II features default to untouched when upgrading a v3 save. */
+  private resetNewC2Progress() {
+    this.c2Act3Seen = false;
+    this.c2NameSeen = false;
+    this.coinBits = 0;
+    this.tollPaid = false;
+    this.auditorIntroSeen = false;
+    this.auditorDefeated = false;
+    this.pageBits = 0;
+    this.chimeBits = 0;
+    this.chimeStep = 0;
+    this.chimeHover = -1;
+    this.siegeIntroSeen = false;
+    this.siegeActive = false;
+    this.siegeT = 0;
+    this.siegeSpawnT = 0;
+    this.siegeDone = false;
+    this.heraldIntroSeen = false;
+    this.stormIntroSeen = false;
+    this.stormDefeated = false;
+    this.witnessBits = 0;
+    this.confessionSeen = false;
+    this.c2TrustSeen = false;
+  }
+
+  /** Put the player back under an ordinary sky after the Chapter-II finale. */
+  private returnToGround() {
+    this.sky = null;
+    this.siegeActive = false;
+    this.siegeT = 0;
+    const sx = this.world.spawnX;
+    const groundY = this.world.surfaceY[sx] * TILE;
+    this.px = sx * TILE;
+    this.py = groundY - 22;
+    this.pvx = 0;
+    this.pvy = 0;
+    this.onGround = true;
+    this.fallDistance = 0;
+    this.heirX = this.px + 34;
+    this.heirY = this.py;
+    this.camX = Math.max(0, Math.min(this.world.w * TILE - this.viewW, this.px - this.viewW / 2));
+    this.camY = Math.max(0, Math.min(this.world.h * TILE - this.viewH, this.py - this.viewH / 2));
+    this.dayFrac = 0.27;
   }
 
   private clearSave() {
@@ -922,29 +1220,37 @@ export class Engine {
     if (!this.storyId) return;
     const id = this.storyId;
     this.storyId = null;
-    if (id === "c2_intro") this.c2Seen = true;
-    if (id === "c2_act2") this.spawnShard(1);
-    else if (id === "c2_shard1") this.spawnShard(2);
-    else if (id === "c2_shard2") this.spawnShard(3);
-    else if (id === "c2_shard3") this.spawnGate();
+    if (id === "c2_intro") {
+      this.c2Seen = true;
+      this.enterSkyRealm(true);
+    } else if (id === "c2_auditor") {
+      this.spawnAuditor();
+    } else if (id === "c2_herald_intro") {
+      this.spawnHerald();
+    } else if (id === "c2_stormfather") {
+      this.spawnStormfather();
+    } else if (id === "c2_siege") {
+      this.beginSiege();
+    } else if (id === "c2_final") {
+      // Chapter II has one ending now: the fall at the summit.
+      this.finishChapter2();
+      return;
+    }
     this.checkQuest();
     this.saveGame();
     this.pushState();
   }
 
-  /** Final choice at the Hollow Gate. */
-  chooseEnding(id: string) {
+  /** Close the final chapter with its single canonical ending. */
+  private finishChapter2() {
     if (!this.c2Active || this.c2Ending) return;
-    if (id !== "crown" && id !== "debt" && id !== "dawn") return;
-    if (id === "dawn" && this.heirFed < SECRET_TRUST) return;
-    this.storyId = null;
-    this.c2Ending = id;
+    this.c2Ending = CHAPTER2_ENDING;
     this.questIndex = QUESTS.length;
     this.victory = true;
     this.gameover = false;
     audio.playSfx("victory");
-    audio.setTrack(id === "dawn" ? "day" : "menu");
-    this.showBanner("THE DEBT OF LIGHT", "Your choice is written");
+    audio.setTrack("day");
+    this.showBanner(t("c2_sky_title"), t("c2_sky_sub"));
     this.saveGame();
     this.pushState();
     this.cb.onVictory();
@@ -960,55 +1266,141 @@ export class Engine {
     this.pushState();
   }
 
+  /** Bring a loaded save up to the clouds when its chapter is already open. */
+  private prepareChapter2() {
+    if (!this.c2Active || this.c2Ending) return;
+    if (this.c2Seen) {
+      const tx = Math.max(0, Math.min(this.world.w - 1, Math.floor(this.px / TILE)));
+      const inSky = this.py / TILE < this.world.surfaceY[tx] - 8;
+      this.enterSkyRealm(!inSky);
+    }
+    this.ensureC2Objects();
+  }
+
+  /**
+   * Carve the Skyhold into the world and (optionally) place the player on the
+   * arrival island. The archipelago is part of the saved world, so it stays
+   * consistent across reloads.
+   */
+  private enterSkyRealm(toArrival: boolean, islandIdx = 0) {
+    this.sky = buildSkyRealm(this.world);
+    if (this.shardPos) this.shardPos = null;
+    if (this.gatePos) {
+      this.clearGateAt(this.gatePos);
+      this.gatePos = null;
+    }
+    if (!toArrival) return;
+    const isl = this.sky.islands[Math.max(0, Math.min(this.sky.islands.length - 1, islandIdx))];
+    const x = isl.x;
+    const y = isl.top;
+    this.px = (x + 0.5) * TILE;
+    this.py = y * TILE - 24;
+    this.pvx = 0;
+    this.pvy = 0;
+    this.fallDistance = 0;
+    this.heirX = this.px + 34;
+    this.heirY = this.py;
+    this.camX = Math.max(0, Math.min(this.world.w * TILE - this.viewW, this.px - this.viewW / 2));
+    this.camY = Math.max(-this.viewH * 0.34, Math.min(this.world.h * TILE - this.viewH, this.py - this.viewH / 2));
+    this.dayFrac = 0.22;
+    this.flashT = 1.1;
+    for (let i = 0; i < 26; i++) this.dust(this.px, this.py, "#dff4ff");
+    this.showBanner("THE SKYHOLD", "The clouds remember the First Warden");
+  }
+
+  /** If the player slips off the islands, the clouds carry them back to the nearest isle. */
+  private skyRescue() {
+    if (!this.c2Active || !this.c2Seen || this.c2Ending) return;
+    const tx = Math.max(0, Math.min(this.world.w - 1, Math.floor(this.px / TILE)));
+    if (this.py / TILE < this.world.surfaceY[tx] - 5) return;
+    const l = this.sky ?? skyLayout(this.world);
+    const here = this.px / TILE;
+    let best = 0;
+    for (let i = 1; i < l.islands.length; i++) {
+      if (Math.abs(l.islands[i].x - here) < Math.abs(l.islands[best].x - here)) best = i;
+    }
+    this.enterSkyRealm(true, best);
+    this.showBanner("THE CLOUDS CATCH YOU", "The Skyhold pulls you back");
+  }
+
   private ensureC2Objects() {
     if (!this.c2Active || this.c2Ending) return;
-    if (this.questIndex >= 12 && this.questIndex <= 14 && !this.shardPos && this.shardsFound < 3) {
-      this.spawnShard(Math.min(3, this.shardsFound + 1));
+    this.sky = skyLayout(this.world);
+    if (!this.shardPos) {
+      if (this.questIndex === C2_SHARD1 && this.shardsFound < 1) this.spawnShard(1);
+      else if (this.questIndex === C2_SHARD2 && this.shardsFound < 2) this.spawnShard(2);
+      else if (this.questIndex === C2_SHARD3 && this.shardsFound < 3) this.spawnShard(3);
     }
-    if (this.questIndex >= 15 && !this.gatePos) {
-      this.spawnGate();
+    if (this.questIndex === C2_AUDITOR && !this.auditorDefeated) {
+      if (!this.auditorIntroSeen) {
+        this.auditorIntroSeen = true;
+        this.triggerStory("c2_auditor");
+      } else if (!this.enemies.some((e) => e.type === "auditor")) {
+        this.spawnAuditor();
+      }
     }
+    if (this.questIndex === C2_HERALD && !this.heraldDefeated) {
+      if (!this.heraldIntroSeen) {
+        this.heraldIntroSeen = true;
+        this.triggerStory("c2_herald_intro");
+      } else if (!this.enemies.some((e) => e.type === "herald")) {
+        this.spawnHerald();
+      }
+    }
+    if (
+      this.questIndex === C2_STORM &&
+      !this.stormDefeated &&
+      this.stormIntroSeen &&
+      !this.enemies.some((e) => e.type === "storm")
+    ) {
+      this.spawnStormfather();
+    }
+  }
+
+  private spawnAuditor() {
+    this.enemies.push({
+      type: "auditor", x: this.px + 90, y: this.py - 80, vx: 0, vy: 0,
+      w: 48, h: 52, hp: 460, maxHp: 460, facing: -1, onGround: false,
+      hopT: 0, hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 2.2,
+    });
+    audio.playSfx("bossSpawn");
+    this.showBanner("THE AUDITOR", "Weighing your years");
+  }
+
+  private spawnStormfather() {
+    const l = this.sky ?? skyLayout(this.world);
+    this.enemies.push({
+      type: "storm", x: (l.camp.x - 3) * TILE, y: (l.camp.y - 2) * TILE, vx: 0, vy: 0,
+      w: 78, h: 64, hp: 720, maxHp: 720, facing: -1, onGround: false,
+      hopT: 0, hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 2.6,
+    });
+    audio.playSfx("bossSpawn");
+    this.showBanner("THE STORMFATHER", "The First Warden's apology");
+  }
+
+  private beginSiege() {
+    this.siegeActive = true;
+    this.siegeT = 45;
+    this.siegeSpawnT = 0.8;
+    this.showBanner("THE CHOIR OF INTEREST", "Hold the archive for 45 seconds");
+  }
+
+  private spawnHerald() {
+    this.enemies.push({
+      type: "herald", x: this.px + 90, y: this.py - 80, vx: 0, vy: 0,
+      w: 54, h: 46, hp: 320, maxHp: 320, facing: -1, onGround: false,
+      hopT: 0, hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 2.5,
+    });
+    audio.playSfx("bossSpawn");
+    this.showBanner("THE HOLLOW HERALD", "The sky sends its collector");
   }
 
   private spawnShard(idx: number) {
-    const dir = idx === 2 ? 1 : -1;
-    const dist = 26 + idx * 6;
-    let sx = Math.floor(this.px / TILE) + dir * dist;
-    sx = Math.max(8, Math.min(this.world.w - 9, sx));
-    const surf = this.world.surfaceY[sx];
-    for (let dy = 1; dy <= 7; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const t = getTile(this.world, sx + dx, surf - dy);
-        if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
-      }
-    }
-    const sy = surf - 3;
-    setTile(this.world, sx, sy, SHARD);
-    this.shardPos = { x: sx, y: sy, idx };
-    this.showBanner("A MEMORY SHARD", "It hums with borrowed light");
-    this.pushState();
-  }
-
-  private spawnGate() {
-    let gx = Math.floor(this.px / TILE) + 30;
-    gx = Math.max(14, Math.min(this.world.w - 15, gx));
-    const surf = this.world.surfaceY[gx];
-    for (let dy = 1; dy <= 10; dy++) {
-      for (let dx = -5; dx <= 6; dx++) {
-        const t = getTile(this.world, gx + dx, surf - dy);
-        if (t === WOOD || t === LEAVES || t === SHARD) setTile(this.world, gx + dx, surf - dy, AIR);
-      }
-    }
-    for (let dy = 1; dy <= 6; dy++) {
-      setTile(this.world, gx - 4, surf - dy, BEDROCK);
-      setTile(this.world, gx + 5, surf - dy, BEDROCK);
-    }
-    for (let dx = -4; dx <= 5; dx++) setTile(this.world, gx + dx, surf - 7, BEDROCK);
-    for (let dx = 0; dx < 3; dx++) {
-      for (let dy = 1; dy <= 6; dy++) setTile(this.world, gx + dx, surf - dy, HOLLOW_GATE);
-    }
-    this.gatePos = { x: gx + 1, y: surf - 3 };
-    this.showBanner("THE HOLLOW GATE", "It has risen where the King fell");
+    if (!this.sky) this.sky = buildSkyRealm(this.world);
+    const pos = this.sky.shards[Math.max(0, Math.min(2, idx - 1))];
+    setTile(this.world, pos.x, pos.y, SHARD);
+    this.shardPos = { x: pos.x, y: pos.y, idx };
+    this.showBanner("A MEMORY SHARD", "It hums with the weight of the sky");
     this.pushState();
   }
 
@@ -1027,7 +1419,167 @@ export class Engine {
   }
 
   private updateStoryTriggers() {
-    if (this.storyId || this.gameover || this.victory || !this.c2Active || this.c2Ending) return;
+    if (this.gameover || this.victory || this.storyId) return;
+    this.skyRescue();
+    if (!this.c2Active || this.c2Ending) return;
+    this.ensureC2Objects();
+    const l = this.sky ?? skyLayout(this.world);
+
+    if (this.questIndex === C2_MOTES) {
+      for (let i = 0; i < l.motes.length; i++) {
+        if (this.moteBits & (1 << i)) continue;
+        const m = l.motes[i];
+        if (!this.nearTile(m.x, m.y, 1.7)) continue;
+        this.moteBits |= 1 << i;
+        audio.playSfx("pickup");
+        const cx = (m.x + 0.5) * TILE;
+        const cy = (m.y + 0.5) * TILE;
+        for (let k = 0; k < 10; k++) this.dust(cx, cy, "#ffe9a8");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.45, max: 0.45, size: 56, color: "rgba(255,235,160,0.9)", grav: 0, ring: true });
+        this.showBanner("SKYLIGHT MOTE", `${this.moteCount()} / 3`);
+        this.checkQuest();
+        this.saveGame();
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_TOLL && !this.tollPaid) {
+      for (let i = 0; i < l.coins.length; i++) {
+        if (this.coinBits & (1 << i)) continue;
+        const c = l.coins[i];
+        if (!this.nearTile(c.x, c.y, 2.6)) continue;
+        this.coinBits |= 1 << i;
+        audio.playSfx("pickup");
+        const cx = (c.x + 0.5) * TILE;
+        const cy = (c.y + 0.5) * TILE;
+        for (let k = 0; k < 8; k++) this.dust(cx, cy, "#ffe08a");
+        this.showBanner("SKY COIN", `${this.coinCount()} / 5`);
+        this.saveGame();
+        return;
+      }
+      if (this.coinCount() >= 5 && this.nearTile(l.toll.x, l.toll.y, 2.8)) {
+        this.tollPaid = true;
+        audio.playSfx("levelup");
+        const cx = (l.toll.x + 0.5) * TILE;
+        const cy = (l.toll.y + 0.5) * TILE;
+        for (let k = 0; k < 16; k++) this.dust(cx, cy, "#ffe08a");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.6, max: 0.6, size: 90, color: "rgba(255,224,138,0.9)", grav: 0, ring: true });
+        this.triggerStory("c2_toll");
+        this.saveGame();
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_SIGIL && !this.sigilFound) {
+      const s = l.sigil;
+      if (this.nearTile(s.x, s.y, 1.7)) {
+        this.sigilFound = true;
+        audio.playSfx("levelup");
+        const cx = (s.x + 0.5) * TILE;
+        const cy = (s.y + 0.5) * TILE;
+        for (let k = 0; k < 14; k++) this.dust(cx, cy, "#ffe08a");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 72, color: "rgba(255,224,138,0.9)", grav: 0, ring: true });
+        this.showBanner("THE WARDEN'S SIGIL", "It still remembers your hand");
+        this.checkQuest();
+        this.saveGame();
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_UNDERSKY) {
+      for (let i = 0; i < l.pages.length; i++) {
+        if (this.pageBits & (1 << i)) continue;
+        const p = l.pages[i];
+        if (!this.nearTile(p.x, p.y, 2.4)) continue;
+        this.pageBits |= 1 << i;
+        audio.playSfx("pickup");
+        const cx = (p.x + 0.5) * TILE;
+        const cy = (p.y + 0.5) * TILE;
+        for (let k = 0; k < 8; k++) this.dust(cx, cy, "#d9c8ff");
+        this.showBanner("TORN PAGE", `${this.pageCount()} / 3`);
+        this.saveGame();
+        if (this.pageCount() >= 3) {
+          this.triggerStory("c2_undersky");
+        }
+        return;
+      }
+    }
+
+    // Chimes only ring on explicit input (right-click / mobile button); walking
+    // past one just highlights it as interactive.
+    if (this.questIndex === C2_CHIMES && this.chimeStep < CHIME_ORDER.length) {
+      this.chimeHover = this.chimeInReach();
+    }
+
+    if (this.questIndex === C2_SIEGE && !this.siegeDone) {
+      if (!this.siegeIntroSeen) {
+        if (this.nearTile(l.archive.x, l.archive.y, 4.0)) {
+          this.siegeIntroSeen = true;
+          this.triggerStory("c2_siege");
+          this.saveGame();
+          return;
+        }
+      } else if (!this.siegeActive) {
+        // Resumed a save mid-siege (or the player died and returned).
+        this.beginSiege();
+      }
+    }
+
+    if (this.questIndex === C2_STORM && !this.stormDefeated && !this.stormIntroSeen) {
+      if (this.nearTile(l.camp.x, l.camp.y, 7)) {
+        this.stormIntroSeen = true;
+        this.triggerStory("c2_stormfather");
+        this.saveGame();
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_WITNESS) {
+      for (let i = 0; i < l.witness.length; i++) {
+        if (this.witnessBits & (1 << i)) continue;
+        const s = l.witness[i];
+        if (!this.nearTile(s.x, s.y, 2.4)) continue;
+        this.witnessBits |= 1 << i;
+        audio.playSfx("levelup");
+        const cx = (s.x + 0.5) * TILE;
+        const cy = (s.y + 0.5) * TILE;
+        for (let k = 0; k < 12; k++) this.dust(cx, cy, "#cfe8ff");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 70, color: "rgba(207,232,255,0.9)", grav: 0, ring: true });
+        this.showBanner("A WITNESS STONE", `${this.witnessCount()} / 4`);
+        this.saveGame();
+        if (this.witnessCount() >= 4) this.triggerStory("c2_witness");
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_CONFESSION && !this.confessionSeen) {
+      if (this.nearTile(l.camp.x, l.camp.y, 3.2)) {
+        this.confessionSeen = true;
+        this.triggerStory("c2_confession");
+        this.saveGame();
+        return;
+      }
+    }
+
+    if (this.questIndex === C2_BELL && !this.bellRung) {
+      const b = l.bell;
+      if (this.nearTile(b.x, b.y, 1.8)) {
+        this.bellRung = true;
+        audio.playSfx("levelup");
+        audio.playSfx("victory");
+        const cx = (b.x + 0.5) * TILE;
+        const cy = (b.y + 0.5) * TILE;
+        for (let k = 0; k < 18; k++) this.dust(cx, cy, "#ffefb0");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.8, max: 0.8, size: 130, color: "rgba(255,239,176,0.9)", grav: 0, ring: true });
+        this.shakeX = 6;
+        this.shakeY = 4;
+        this.showBanner("THE SILENT BELL", "It rings once — and the sky answers");
+        this.checkQuest();
+        this.saveGame();
+        return;
+      }
+    }
+
     if (this.shardPos) {
       const cx = this.shardPos.x * TILE + TILE / 2;
       const cy = this.shardPos.y * TILE + TILE / 2;
@@ -1043,17 +1595,472 @@ export class Engine {
         return;
       }
     }
-    if (this.questIndex >= 15 && this.gatePos) {
-      const cx = this.gatePos.x * TILE + TILE / 2;
-      const cy = this.gatePos.y * TILE;
-      if (Math.hypot(cx - this.px, cy - this.py) < TILE * 3.2) {
+
+    if (this.questIndex >= C2_LAST) {
+      const cx = (l.summit.x + 0.5) * TILE;
+      const cy = l.summit.y * TILE;
+      if (Math.hypot(cx - this.px, cy - this.py) < TILE * 2.4) {
         this.triggerStory("c2_final");
       }
     }
   }
 
+  /** Waves of interest attack the archive while the player holds the ring. */
+  private updateSiege(dt: number) {
+    if (!this.siegeActive || this.storyId || this.gameover || this.victory) return;
+    this.siegeT -= dt;
+    this.siegeSpawnT -= dt;
+    const l = this.sky ?? skyLayout(this.world);
+    if (this.siegeSpawnT <= 0) {
+      this.siegeSpawnT = this.siegeT < 18 ? 2.6 : 3.4;
+      const count = this.siegeT < 18 ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        if (this.enemies.filter((e) => e.type === "wisp").length >= 7) break;
+        const sx = (l.archive.x + (i === 0 ? -7 : 7) + Math.random() * 3) * TILE;
+        const sy = (l.archive.y - 5 - Math.random() * 2) * TILE;
+        this.enemies.push({
+          type: "wisp", x: sx, y: sy, vx: 0, vy: 0,
+          w: 26, h: 22, hp: 28, maxHp: 28, facing: -1, onGround: false, hopT: 0,
+          hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 2 + Math.random() * 2,
+        });
+      }
+    }
+    if (this.siegeT <= 0) {
+      this.siegeActive = false;
+      this.siegeDone = true;
+      this.showBanner("THE ARCHIVE HOLDS", "The interest is paid in static");
+      audio.playSfx("victory");
+      for (let i = 0; i < 20; i++) this.dust((l.archive.x + 0.5) * TILE, (l.archive.y + 0.5) * TILE, "#bff3ff");
+      this.checkQuest();
+      this.saveGame();
+    }
+  }
+
+  private nearTile(tx: number, ty: number, rTiles: number): boolean {
+    return Math.hypot((tx + 0.5) * TILE - this.px, (ty + 0.5) * TILE - this.py) < TILE * rTiles;
+  }
+
+  private moteCount(): number {
+    let n = 0;
+    for (let i = 0; i < 3; i++) if (this.moteBits & (1 << i)) n++;
+    return n;
+  }
+
+  private coinCount(): number {
+    let n = 0;
+    for (let i = 0; i < 5; i++) if (this.coinBits & (1 << i)) n++;
+    return n;
+  }
+
+  private pageCount(): number {
+    let n = 0;
+    for (let i = 0; i < 3; i++) if (this.pageBits & (1 << i)) n++;
+    return n;
+  }
+
+  private witnessCount(): number {
+    let n = 0;
+    for (let i = 0; i < 4; i++) if (this.witnessBits & (1 << i)) n++;
+    return n;
+  }
+
+  private shrinesLit(): number {
+    const l = this.sky ?? skyLayout(this.world);
+    let n = 0;
+    for (const s of l.shrines) {
+      let lit = false;
+      for (let dy = -2; dy <= 0 && !lit; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (getTile(this.world, s.x + dx, s.y + dy) === TORCH) { lit = true; break; }
+        }
+      }
+      if (lit) n++;
+    }
+    return n;
+  }
+
+  /** Lantern shrines, skylight motes, the Warden's sigil and the silent bell. */
+  private drawSkyQuestObjects(ctx: CanvasRenderingContext2D) {
+    const l = this.sky ?? skyLayout(this.world);
+    const t = this.frame * 0.05;
+
+    for (const s of l.shrines) {
+      const cx = (s.x + 0.5) * TILE;
+      const base = (s.y + 1) * TILE;
+      const lit = this.shrineLit(s);
+      if (!lit && this.questIndex === C2_SHRINES) {
+        // a thin beacon so the next shrine can be found across the isles
+        const beam = ctx.createLinearGradient(0, base - 280, 0, base - 16);
+        beam.addColorStop(0, "rgba(150,220,255,0)");
+        beam.addColorStop(1, "rgba(150,220,255,0.22)");
+        ctx.fillStyle = beam;
+        ctx.fillRect(cx - 7, base - 280, 14, 264);
+      }
+      if (lit) {
+        const g = ctx.createRadialGradient(cx, base - 18, 2, cx, base - 18, 44);
+        g.addColorStop(0, "rgba(255,208,120,0.5)");
+        g.addColorStop(1, "rgba(255,170,60,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - 44, base - 62, 88, 88);
+      }
+      // pedestal
+      ctx.fillStyle = "#8aabc4";
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, base);
+      ctx.lineTo(cx - 6, base - 12);
+      ctx.lineTo(cx + 6, base - 12);
+      ctx.lineTo(cx + 10, base);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#c3d9ea";
+      ctx.fillRect(cx - 7, base - 15, 14, 4);
+      // rune bowl
+      ctx.fillStyle = lit ? "#ffd88a" : "#5d7b93";
+      ctx.beginPath();
+      ctx.ellipse(cx, base - 17, 6, 3.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (lit) {
+        const fl = 0.8 + 0.2 * Math.sin(this.frame * 0.3 + s.x);
+        ctx.fillStyle = "#ffb045";
+        ctx.beginPath();
+        ctx.ellipse(cx, base - 23, 3.6, 7 * fl, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff2c0";
+        ctx.beginPath();
+        ctx.ellipse(cx, base - 23, 1.6, 3.6 * fl, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    if (this.questIndex === C2_MOTES) {
+      for (let i = 0; i < l.motes.length; i++) {
+        if (this.moteBits & (1 << i)) continue;
+        const m = l.motes[i];
+        const cx = (m.x + 0.5) * TILE;
+        const cy = (m.y + 0.5) * TILE + Math.sin(t + i * 2.1) * 4;
+        const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 24);
+        g.addColorStop(0, "rgba(255,244,190,0.75)");
+        g.addColorStop(0.5, "rgba(255,225,130,0.32)");
+        g.addColorStop(1, "rgba(255,210,90,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - 24, cy - 24, 48, 48);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.sin(t * 0.8 + i) * 0.25);
+        ctx.fillStyle = "#fff6cf";
+        ctx.beginPath();
+        ctx.moveTo(0, -9);
+        ctx.lineTo(6, 0);
+        ctx.lineTo(0, 9);
+        ctx.lineTo(-6, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.restore();
+        for (let k = 0; k < 3; k++) {
+          const a = t * 1.4 + (k * Math.PI * 2) / 3 + i;
+          ctx.fillStyle = "rgba(255,250,210,0.9)";
+          ctx.fillRect(cx + Math.cos(a) * 14 - 1, cy + Math.sin(a) * 6 - 1, 2, 2);
+        }
+      }
+    }
+
+    if (this.questIndex === C2_SIGIL && !this.sigilFound) {
+      const s = l.sigil;
+      const cx = (s.x + 0.5) * TILE;
+      const cy = (s.y + 0.5) * TILE + Math.sin(t * 1.2) * 5;
+      const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 30);
+      g.addColorStop(0, "rgba(255,226,140,0.7)");
+      g.addColorStop(1, "rgba(255,200,80,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - 30, cy - 30, 60, 60);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.sin(t * 0.6) * 0.12);
+      ctx.fillStyle = "#ffd23b";
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(10, -6);
+      ctx.lineTo(7, 8);
+      ctx.lineTo(0, 14);
+      ctx.lineTo(-7, 8);
+      ctx.lineTo(-10, -6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#7a5a12";
+      ctx.fillRect(-2, -9, 4, 14);
+      ctx.fillRect(-6, -2, 12, 3);
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (this.questIndex === C2_TOLL && !this.tollPaid) {
+      // the toll gate: two cloudstone posts and a slot that eats coins
+      const tx = (l.toll.x + 0.5) * TILE;
+      const ty = (l.toll.y + 0.5) * TILE;
+      ctx.fillStyle = "#8aabc4";
+      ctx.fillRect(tx - 20, ty - 18, 6, 30);
+      ctx.fillRect(tx + 14, ty - 18, 6, 30);
+      ctx.fillStyle = "#c3d9ea";
+      ctx.fillRect(tx - 24, ty - 24, 48, 8);
+      ctx.fillStyle = "#5d7b93";
+      ctx.fillRect(tx - 5, ty - 17, 10, 3);
+      const g = ctx.createRadialGradient(tx, ty - 14, 1, tx, ty - 14, 26);
+      g.addColorStop(0, "rgba(255,224,138,0.55)");
+      g.addColorStop(1, "rgba(255,200,80,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(tx - 26, ty - 40, 52, 52);
+
+      // waypoint: a gold diamond and a light pillar so the gate reads across isles
+      const pulse = 0.55 + 0.45 * Math.sin(t * 1.6);
+      const dy = ty - 86 + Math.sin(t * 1.3) * 7;
+      const beam = ctx.createLinearGradient(0, ty - 360, 0, ty - 20);
+      beam.addColorStop(0, "rgba(255,214,90,0)");
+      beam.addColorStop(1, `rgba(255,214,90,${0.1 + 0.08 * pulse})`);
+      ctx.fillStyle = beam;
+      ctx.fillRect(tx - 5, ty - 360, 10, 340);
+      const halo = ctx.createRadialGradient(tx, dy, 2, tx, dy, 36);
+      halo.addColorStop(0, `rgba(255,214,90,${0.35 + 0.35 * pulse})`);
+      halo.addColorStop(1, "rgba(255,200,80,0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(tx - 36, dy - 36, 72, 72);
+      ctx.save();
+      ctx.translate(tx, dy);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "#1a1408";
+      ctx.fillRect(-10, -10, 20, 20);
+      ctx.fillStyle = "#ffd23b";
+      ctx.fillRect(-8, -8, 16, 16);
+      ctx.fillStyle = "#fff2b0";
+      ctx.fillRect(-4, -4, 8, 8);
+      ctx.restore();
+      ctx.fillStyle = "#ffe9a8";
+      ctx.beginPath();
+      ctx.moveTo(tx - 8, dy + 17);
+      ctx.lineTo(tx + 8, dy + 17);
+      ctx.lineTo(tx, dy + 27);
+      ctx.closePath();
+      ctx.fill();
+
+      for (let i = 0; i < 5; i++) {
+        if (this.coinBits & (1 << i)) continue;
+        const cx = (l.coins[i].x + 0.5) * TILE;
+        const cy = (l.coins[i].y + 0.5) * TILE + Math.sin(t * 1.3 + i) * 3;
+        const cg = ctx.createRadialGradient(cx, cy, 1, cx, cy, 18);
+        cg.addColorStop(0, `rgba(255,220,120,${0.35 + 0.2 * pulse})`);
+        cg.addColorStop(1, "rgba(255,200,80,0)");
+        ctx.fillStyle = cg;
+        ctx.fillRect(cx - 18, cy - 18, 36, 36);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(Math.max(0.25, Math.abs(Math.cos(t * 1.1 + i))), 1);
+        ctx.fillStyle = "#ffd23b";
+        ctx.beginPath();
+        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#b8860b";
+        ctx.beginPath();
+        ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff2b0";
+        ctx.fillRect(-1, -3, 2, 6);
+        ctx.restore();
+      }
+    }
+
+    if (this.questIndex === C2_UNDERSKY) {
+      for (let i = 0; i < l.pages.length; i++) {
+        if (this.pageBits & (1 << i)) continue;
+        const p = l.pages[i];
+        const cx = (p.x + 0.5) * TILE;
+        const cy = (p.y + 0.5) * TILE + Math.sin(t * 1.1 + i * 1.7) * 4;
+        const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, 22);
+        g.addColorStop(0, "rgba(220,205,255,0.6)");
+        g.addColorStop(1, "rgba(170,150,240,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - 22, cy - 22, 44, 44);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.sin(t * 0.7 + i) * 0.25);
+        ctx.fillStyle = "#f3ecff";
+        ctx.fillRect(-6, -8, 12, 16);
+        ctx.fillStyle = "#b8a6e6";
+        ctx.fillRect(-4, -5, 8, 1);
+        ctx.fillRect(-4, -2, 8, 1);
+        ctx.fillRect(-4, 1, 6, 1);
+        ctx.fillStyle = "#7a68b8";
+        ctx.fillRect(-6, -8, 2, 16);
+        ctx.restore();
+      }
+    }
+
+    if (this.questIndex === C2_CHIMES && this.chimeStep < CHIME_ORDER.length) {
+      for (let i = 0; i < l.chimes.length; i++) {
+        const c = l.chimes[i];
+        const cx = (c.x + 0.5) * TILE;
+        const base = (c.y + 1) * TILE;
+        const next = CHIME_ORDER[this.chimeStep] === i;
+        const lit = (this.chimeBits & (1 << i)) !== 0;
+        const hover = this.chimeHover === i && !lit;
+        ctx.fillStyle = "#7d94a8";
+        ctx.fillRect(cx - 2, base - 34, 4, 34);
+        ctx.fillRect(cx - 2, base - 34, 18, 3);
+        const bx = cx + 14;
+        const by = base - 26;
+        if (next || hover) {
+          const g = ctx.createRadialGradient(bx, by, 1, bx, by, hover ? 30 : 24);
+          g.addColorStop(0, hover ? "rgba(230,251,255,0.85)" : "rgba(190,243,255,0.6)");
+          g.addColorStop(1, "rgba(140,220,255,0)");
+          ctx.fillStyle = g;
+          const r = hover ? 30 : 24;
+          ctx.fillRect(bx - r, by - r, r * 2, r * 2);
+        }
+        ctx.fillStyle = lit ? "#d8f6ff" : hover ? "#e6fbff" : next ? "#a8dcf0" : "#7a9db5";
+        ctx.beginPath();
+        ctx.moveTo(bx - 6, by + 5);
+        ctx.quadraticCurveTo(bx - 7, by - 7, bx, by - 9);
+        ctx.quadraticCurveTo(bx + 7, by - 7, bx + 6, by + 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#4f6a7c";
+        ctx.fillRect(bx - 7, by + 5, 14, 2);
+      }
+    }
+
+    if (this.questIndex === C2_WITNESS) {
+      for (let i = 0; i < l.witness.length; i++) {
+        const w = l.witness[i];
+        const cx = (w.x + 0.5) * TILE;
+        const base = (w.y + 1) * TILE;
+        const lit = (this.witnessBits & (1 << i)) !== 0;
+        ctx.fillStyle = lit ? "#e8f4ff" : "#5d6f86";
+        ctx.beginPath();
+        ctx.moveTo(cx - 7, base);
+        ctx.lineTo(cx - 5, base - 20);
+        ctx.lineTo(cx + 4, base - 22);
+        ctx.lineTo(cx + 8, base);
+        ctx.closePath();
+        ctx.fill();
+        if (lit) {
+          const g = ctx.createRadialGradient(cx, base - 14, 1, cx, base - 14, 24);
+          g.addColorStop(0, "rgba(207,232,255,0.6)");
+          g.addColorStop(1, "rgba(160,200,255,0)");
+          ctx.fillStyle = g;
+          ctx.fillRect(cx - 24, base - 38, 48, 48);
+          ctx.fillStyle = "#bff3ff";
+          ctx.fillRect(cx - 2, base - 17, 4, 2);
+          ctx.fillRect(cx - 1, base - 14, 2, 6);
+        } else {
+          ctx.fillStyle = "#3f4c5c";
+          ctx.fillRect(cx - 2, base - 16, 4, 2);
+          ctx.fillRect(cx - 1, base - 13, 2, 5);
+        }
+      }
+    }
+
+    // the archive isle — the Order's reading room, held together by static
+    const arx = (l.archive.x + 0.5) * TILE;
+    const ary = (l.archive.y + 1) * TILE;
+    if (this.questIndex >= C2_AUDITOR && this.questIndex <= C2_SIEGE + 1) {
+      const siege = this.questIndex === C2_SIEGE && !this.siegeDone;
+      const g = ctx.createRadialGradient(arx, ary - 22, 2, arx, ary - 22, 60);
+      g.addColorStop(0, siege ? "rgba(140,235,255,0.42)" : "rgba(180,205,255,0.2)");
+      g.addColorStop(1, "rgba(120,180,255,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(arx - 60, ary - 82, 120, 120);
+      ctx.fillStyle = "#8aabc4";
+      ctx.fillRect(arx - 18, ary - 14, 36, 14);
+      ctx.fillStyle = "#b9d2e4";
+      ctx.fillRect(arx - 14, ary - 20, 28, 6);
+      ctx.fillStyle = "#f3ecff";
+      ctx.fillRect(arx - 7, ary - 26, 14, 7);
+      ctx.fillStyle = "#7a68b8";
+      ctx.fillRect(arx - 7, ary - 26, 2, 7);
+      for (let k = 0; k < 3; k++) {
+        const a = t * 0.8 + (k * Math.PI * 2) / 3;
+        ctx.fillStyle = "rgba(220,240,255,0.75)";
+        ctx.fillRect(arx + Math.cos(a) * 30 - 2, ary - 30 + Math.sin(a) * 12 - 2, 4, 4);
+      }
+    }
+
+    // the Warden's camp on the far isle
+    const cpx = (l.camp.x + 0.5) * TILE;
+    const cpy = (l.camp.y + 1) * TILE;
+    if (this.questIndex >= C2_STORM - 1) {
+      ctx.fillStyle = "#6f879b";
+      ctx.beginPath();
+      ctx.moveTo(cpx - 26, cpy);
+      ctx.lineTo(cpx - 10, cpy - 26);
+      ctx.lineTo(cpx + 6, cpy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#cfe0ee";
+      ctx.beginPath();
+      ctx.moveTo(cpx - 22, cpy - 3);
+      ctx.lineTo(cpx - 10, cpy - 22);
+      ctx.lineTo(cpx + 2, cpy - 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#7d94a8";
+      ctx.fillRect(cpx + 14, cpy - 30, 2, 30);
+      ctx.fillStyle = this.stormDefeated ? "#7dd3fc" : "#e8f4ff";
+      ctx.fillRect(cpx + 15, cpy - 30, 12, 7);
+      const g = ctx.createRadialGradient(cpx + 12, cpy - 6, 1, cpx + 12, cpy - 6, 26);
+      g.addColorStop(0, "rgba(255,190,110,0.45)");
+      g.addColorStop(1, "rgba(255,150,60,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(cpx - 14, cpy - 32, 52, 40);
+      ctx.fillStyle = "#ffb45a";
+      ctx.beginPath();
+      ctx.ellipse(cpx + 12, cpy - 5, 3, 5 + Math.sin(this.frame * 0.3) * 1.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const b = l.bell;
+    const bx = (b.x + 0.5) * TILE;
+    const by = (b.y + 0.5) * TILE + Math.sin(t * 0.7) * 2;
+    const active = this.questIndex === C2_BELL && !this.bellRung;
+    if (active) {
+      const g = ctx.createRadialGradient(bx, by, 1, bx, by, 34);
+      g.addColorStop(0, "rgba(255,240,180,0.55)");
+      g.addColorStop(1, "rgba(255,220,120,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(bx - 34, by - 34, 68, 68);
+    }
+    ctx.fillStyle = this.bellRung ? "#8d7a4a" : "#ffe08a";
+    ctx.beginPath();
+    ctx.moveTo(bx - 10, by + 8);
+    ctx.quadraticCurveTo(bx - 11, by - 10, bx, by - 13);
+    ctx.quadraticCurveTo(bx + 11, by - 10, bx + 10, by + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = this.bellRung ? "#5f5232" : "#b8860b";
+    ctx.fillRect(bx - 11, by + 8, 22, 3);
+    ctx.fillStyle = "#2b2313";
+    ctx.beginPath();
+    ctx.arc(bx, by + 12, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (!this.bellRung) {
+      ctx.fillStyle = "rgba(255,250,220,0.9)";
+      ctx.fillRect(bx - 1, by - 11, 2, 8);
+    }
+  }
+
+  private shrineLit(s: { x: number; y: number }): boolean {
+    for (let dy = -2; dy <= 0; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (getTile(this.world, s.x + dx, s.y + dy) === TORCH) return true;
+      }
+    }
+    return false;
+  }
+
   private updateHeir(dt: number) {
-    if (!this.c2Active) return;
+    if (!this.c2Active || this.c2Ending) return;
     const targetX = this.px - this.pface * 36;
     const targetY = this.py + 12;
     const dx = targetX - this.heirX;
@@ -1065,8 +2072,138 @@ export class Engine {
     }
   }
 
+  private inSky(): boolean {
+    return this.c2Active && this.c2Seen && !this.c2Ending && this.py / TILE < 36;
+  }
+
+  /** Soft, parallaxing cloud banks behind the floating islands. */
+  private drawSkyClouds(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    const t = this.frame;
+    for (let i = 0; i < 16; i++) {
+      const layer = i % 4;
+      const px = ((i * 211 + this.camX * (0.06 + layer * 0.05) + t * (0.15 + layer * 0.1)) % (this.viewW + 420)) - 210;
+      const py = ((i * 137 + this.camY * 0.05 + Math.sin(t * 0.004 + i) * 22) % (this.viewH + 280)) - 140;
+      const r = 80 + layer * 38 + (i % 3) * 20;
+      const a = 0.055 + layer * 0.022;
+      const g = ctx.createRadialGradient(px, py, 2, px, py, r);
+      g.addColorStop(0, `rgba(255,255,255,${a})`);
+      g.addColorStop(0.55, `rgba(226,243,255,${a * 0.55})`);
+      g.addColorStop(1, "rgba(210,235,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(px, py, r, r * 0.46, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px + r * 0.45, py + 6, r * 0.62, r * 0.32, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Golden pillar marking the highest point of the Skyhold. */
+  private drawSummitBeam(ctx: CanvasRenderingContext2D) {
+    if (!this.sky) return;
+    const sx = (this.sky.summit.x + 0.5) * TILE;
+    const sy = this.sky.summit.y * TILE;
+    const pulse = 0.75 + 0.25 * Math.sin(this.frame * 0.03);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const g = ctx.createLinearGradient(0, 0, 0, sy);
+    g.addColorStop(0, "rgba(255,240,190,0)");
+    g.addColorStop(0.6, `rgba(255,226,150,${0.045 * pulse})`);
+    g.addColorStop(1, `rgba(255,238,180,${0.22 * pulse})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(sx - 28, 0, 56, sy);
+    for (let i = 0; i < 14; i++) {
+      const fy = ((this.frame * 0.9 + i * 37) % Math.max(1, sy));
+      const fx = sx + Math.sin(this.frame * 0.02 + i * 1.9) * 16;
+      ctx.fillStyle = `rgba(255,245,205,${0.18 + 0.25 * Math.sin(this.frame * 0.05 + i)})`;
+      ctx.fillRect(fx, sy - fy, 2, 2);
+    }
+    ctx.restore();
+  }
+
+  /** Mira, waiting on the summit. Her book is the only bright thing about her. */
+  private drawMira(ctx: CanvasRenderingContext2D) {
+    if (!this.sky) return;
+    const x = (this.sky.mira.x + 0.5) * TILE;
+    const footY = this.sky.mira.y * TILE;
+    const t = this.frame * 0.05;
+    const bob = Math.sin(t) * 1.2;
+    const sway = Math.sin(t * 0.7) * 1.5;
+    ctx.save();
+    ctx.translate(x, footY + bob);
+
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 15, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // faint violet halo: the Collector's mark
+    const halo = ctx.createRadialGradient(0, -34, 2, 0, -34, 38);
+    halo.addColorStop(0, "rgba(167,139,250,0.16)");
+    halo.addColorStop(1, "rgba(167,139,250,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(-38, -72, 76, 76);
+
+    // cloak
+    ctx.fillStyle = "#241f33";
+    ctx.beginPath();
+    ctx.moveTo(-9 + sway, -48);
+    ctx.lineTo(9 + sway, -48);
+    ctx.lineTo(17, 0);
+    ctx.lineTo(-17, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#332a47";
+    ctx.beginPath();
+    ctx.moveTo(-6, -44);
+    ctx.lineTo(5, -44);
+    ctx.lineTo(8, 0);
+    ctx.lineTo(-10, 0);
+    ctx.closePath();
+    ctx.fill();
+    // amber trim
+    ctx.strokeStyle = "rgba(251,191,36,0.65)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-15, -3);
+    ctx.lineTo(-9, -42);
+    ctx.moveTo(15, -3);
+    ctx.lineTo(9, -42);
+    ctx.stroke();
+
+    // hood and face
+    ctx.fillStyle = "#1b1727";
+    ctx.beginPath();
+    ctx.arc(0 + sway, -55, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e6d6bf";
+    ctx.beginPath();
+    ctx.arc(0 + sway, -54, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2b2238";
+    ctx.fillRect(-4 + sway, -56, 2, 2);
+    ctx.fillRect(3 + sway, -56, 2, 2);
+
+    // the ledger
+    const glow = 0.55 + 0.25 * Math.sin(this.frame * 0.12);
+    ctx.fillStyle = `rgba(255,220,140,${glow})`;
+    ctx.fillRect(9, -36, 12, 15);
+    ctx.fillStyle = "rgba(90,60,25,0.8)";
+    ctx.fillRect(9, -36, 2, 15);
+    ctx.strokeStyle = "rgba(255,240,190,0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(9.5, -35.5, 11, 14);
+    ctx.restore();
+  }
+
   private drawHeir(ctx: CanvasRenderingContext2D) {
-    if (!this.c2Active) return;
+    if (!this.c2Active || this.c2Ending) return;
     const x = this.heirX;
     const hop = Math.abs(Math.sin(this.heirHop)) * 3;
     const y = this.heirY - hop;
@@ -1108,7 +2245,7 @@ export class Engine {
   }
 
   private bossActive(): boolean {
-    return this.enemies.some((e) => e.type === "king");
+    return this.enemies.some((e) => e.type === "king" || e.type === "herald" || e.type === "auditor" || e.type === "storm");
   }
   private isNightNow(): boolean {
     return Math.sin(this.dayFrac * Math.PI * 2) < 0;
@@ -1162,6 +2299,11 @@ export class Engine {
       this.mouseWY = (e.clientY - r.top) / r.height * this.viewH + this.camY;
       this.mouseTX = Math.floor(this.mouseWX / TILE);
       this.mouseTY = Math.floor(this.mouseWY / TILE);
+      // Right-click next to a chime rings it instead of placing a block.
+      if (e.button === 2 && this.ringNearbyChime()) {
+        this.rightDown = false;
+        return;
+      }
       const placing = this.placeMode || e.button === 2;
       if (placing) {
         this.rightDown = true;
@@ -1275,8 +2417,9 @@ export class Engine {
   private update(dt: number) {
     // A story card is on screen — freeze the sim (rendering continues).
     if (this.storyId) return;
-    // day cycle
-    this.dayFrac = (this.dayFrac + dt / DAY_LEN) % 1;
+    // day cycle — the Skyhold is held at dawn for the whole chapter
+    if (this.c2Active && this.c2Seen && !this.c2Ending) this.dayFrac = 0.22;
+    else this.dayFrac = (this.dayFrac + dt / DAY_LEN) % 1;
     const night = this.isNightNow();
     const wantTrack = this.bossActive() ? "boss" : night ? "night" : "day";
     audio.setTrack(wantTrack);
@@ -1288,6 +2431,7 @@ export class Engine {
     this.hurtT = Math.max(0, this.hurtT - dt);
     this.portalMsgCd = Math.max(0, this.portalMsgCd - dt);
     this.bannerT = Math.max(0, this.bannerT - dt);
+    this.flashT = Math.max(0, this.flashT - dt);
     if (this.bannerT <= 0) this.banner = null;
 
     // regen
@@ -1316,6 +2460,7 @@ export class Engine {
     this.updateAmbient(dt, night);
     this.updateHeir(dt);
     this.updateStoryTriggers();
+    this.updateSiege(dt);
 
     // spawns
     this.spawnT -= dt;
@@ -1331,7 +2476,8 @@ export class Engine {
     this.camX += (targetCX - this.camX) * Math.min(1, dt * 8);
     this.camY += (targetCY - this.camY) * Math.min(1, dt * 8);
     this.camX = Math.max(0, Math.min(this.world.w * TILE - this.viewW, this.camX));
-    this.camY = Math.max(0, Math.min(this.world.h * TILE - this.viewH, this.camY));
+    const skyCamTop = this.c2Active && this.c2Seen && !this.c2Ending ? -this.viewH * 0.34 : 0;
+    this.camY = Math.max(skyCamTop, Math.min(this.world.h * TILE - this.viewH, this.camY));
 
     // autosave periodically
     this.saveTimer -= dt;
@@ -1673,7 +2819,13 @@ export class Engine {
     if (idx < 0) return;
     this.enemies.splice(idx, 1);
     audio.playSfx("enemyDie");
-    const burstColor = e.type === "zombie" ? "#6fae5a" : e.type === "bat" ? "#9a7bff" : "#5fd06f";
+    const burstColor =
+      e.type === "zombie" ? "#6fae5a"
+      : e.type === "bat" ? "#9a7bff"
+      : e.type === "storm" ? "#d6eaff"
+      : e.type === "auditor" ? "#ffe8a8"
+      : e.type === "wisp" || e.type === "herald" ? "#8fe8ff"
+      : "#5fd06f";
     for (let i = 0; i < 8; i++) this.dust(e.x, e.y, burstColor);
     // shockwave ring
     this.particles.push({ x: e.x, y: e.y, vx: 0, vy: 0, life: 0.35, max: 0.35, size: e.w * 1.6 + 14, color: "rgba(255,255,255,0.9)", grav: 0, ring: true });
@@ -1684,14 +2836,27 @@ export class Engine {
       this.addItem("gel", 30);
       audio.playSfx("victory");
       if (!this.c2Active || this.c2Ending) {
-        this.showBanner("THE KING FALLS", "Dawn breaks — and something below begins to count");
+        this.showBanner("THE KING FALLS", "Dawn breaks — and the sky begins to count");
         this.c2Active = true;
+        this.c2Act2Seen = false;
+        this.c2Act3Seen = false;
         this.c2Ending = null;
         this.heirFed = 0;
         this.shardsFound = 0;
         this.shardPos = null;
-        this.gatePos = null;
-        this.questIndex = 11;
+        this.moteBits = 0;
+        this.sigilFound = false;
+        this.bellRung = false;
+        this.wispsKilled = 0;
+        this.heraldDefeated = false;
+        this.c2NameSeen = false;
+        this.resetNewC2Progress();
+        if (this.gatePos) {
+          this.clearGateAt(this.gatePos);
+          this.gatePos = null;
+        }
+        this.sky = null;
+        this.questIndex = C2_START;
         this.heirX = this.px + 34;
         this.heirY = this.py;
         this.triggerStory("c2_intro");
@@ -1710,10 +2875,60 @@ export class Engine {
       if (Math.random() < 0.4) this.addItem("wood", 1 + Math.floor(Math.random() * 2));
       if (Math.random() < 0.3) this.addItem("rotten_flesh", 1);
     }
+    if (e.type === "wisp") {
+      this.wispsKilled++;
+      const n = 1 + (Math.random() < 0.5 ? 1 : 0);
+      this.addItem("essence", n);
+      this.float(e.x, e.y - 18, `+${n} ✨`, "#a8f0ff");
+    }
+    if (e.type === "herald") {
+      this.heraldDefeated = true;
+      this.addItem("essence", 6);
+      this.addItem("gel", 8);
+      audio.playSfx("victory");
+      this.showBanner("THE HOLLOW HERALD FALLS", "The sky has no more collectors");
+      this.triggerStory("c2_herald_end");
+      this.saveGame();
+      return;
+    }
+    if (e.type === "auditor") {
+      this.auditorDefeated = true;
+      this.addItem("essence", 5);
+      this.addItem("gel", 10);
+      audio.playSfx("victory");
+      this.showBanner("THE AUDITOR BALANCED", "The ledger loses a page");
+      this.triggerStory("c2_auditor_end");
+      this.saveGame();
+      return;
+    }
+    if (e.type === "storm") {
+      this.stormDefeated = true;
+      this.addItem("essence", 10);
+      this.addItem("gel", 15);
+      audio.playSfx("victory");
+      this.showBanner("THE STORMFATHER FALLS", "The first apology, finally heard");
+      this.triggerStory("c2_stormfather_end");
+      this.saveGame();
+      return;
+    }
+    this.checkQuest();
   }
 
   // ---------- enemies ----------
   private trySpawn(night: boolean) {
+    if (this.c2Active && this.c2Seen && !this.c2Ending) {
+      // The sky has its own wildlife: wisps, and only once the ledger starts.
+      if (this.questIndex < C2_WISPS || this.questIndex >= C2_LAST) return;
+      if (this.siegeActive || this.bossActive()) return;
+      if (this.enemies.filter((e) => e.type === "wisp").length >= 3) return;
+      const x = Math.max(80, Math.min(this.world.w * TILE - 80, this.px + (Math.random() < 0.5 ? -1 : 1) * (this.viewW * 0.45 + 40)));
+      this.enemies.push({
+        type: "wisp", x, y: Math.max(TILE * 3, this.py - 120 - Math.random() * 120), vx: 0, vy: 0,
+        w: 26, h: 22, hp: 24, maxHp: 24, facing: -1, onGround: false, hopT: 0,
+        hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 2 + Math.random() * 2.5,
+      });
+      return;
+    }
     if (this.enemies.length >= 9) return;
     if (this.bossActive()) return;
     const sx = this.px + (Math.random() < 0.5 ? -1 : 1) * (this.viewW / 2 + 60 + Math.random() * 120);
@@ -1754,29 +2969,37 @@ export class Engine {
       e.spawnT -= dt;
       const dx = this.px - e.x;
       e.facing = dx >= 0 ? 1 : -1;
-      if (e.type === "bat") {
+      if (e.type === "bat" || e.type === "wisp" || e.type === "herald" || e.type === "auditor" || e.type === "storm") {
+        const bossFlyer = e.type === "herald" || e.type === "auditor" || e.type === "storm";
+        const storm = e.type === "storm";
+        const auditor = e.type === "auditor";
+        const wisp = e.type === "wisp";
+        const hover = storm ? 46 : auditor ? 38 : bossFlyer ? 34 : wisp ? 72 : 60;
+        const calmA = storm ? 0.55 : auditor ? 0.8 : bossFlyer ? 0.7 : wisp ? 0.9 : 1;
+        const maxV = storm ? 110 : auditor ? 150 : bossFlyer ? 130 : wisp ? 160 : 260;
+        const dive = storm ? 280 : auditor ? 340 : bossFlyer ? 300 : wisp ? 360 : 500;
         e.swoopT -= dt;
         if (e.swoopT > 0) {
           // normal flight
-          e.vy += (this.py - 60 - e.y) * 1.4 * dt;
-          e.vy = Math.max(-260, Math.min(260, e.vy));
-          e.vx += Math.sign(dx) * 60 * dt;
-          e.vx = Math.max(-150, Math.min(150, e.vx));
-        } else if (e.swoopT > -0.3) {
+          e.vy += (this.py - hover - e.y) * 1.4 * calmA * dt;
+          e.vy = Math.max(-maxV, Math.min(maxV, e.vy));
+          e.vx += Math.sign(dx) * (wisp ? 50 : 60) * calmA * dt;
+          e.vx = Math.max(-maxV * 0.6, Math.min(maxV * 0.6, e.vx));
+        } else if (e.swoopT > (bossFlyer ? -0.55 : -0.3)) {
           // swoop phase: rapid dive toward player
           const targetX = this.px;
-          const targetY = this.py - 30;
-          e.vx += Math.sign(targetX - e.x) * 400 * dt;
-          e.vy += Math.sign(targetY - e.y) * 400 * dt;
-          e.vx = Math.max(-500, Math.min(500, e.vx));
-          e.vy = Math.max(-500, Math.min(500, e.vy));
+          const targetY = this.py - (bossFlyer ? 20 : 30);
+          e.vx += Math.sign(targetX - e.x) * dive * 0.8 * dt;
+          e.vy += Math.sign(targetY - e.y) * dive * 0.8 * dt;
+          e.vx = Math.max(-dive, Math.min(dive, e.vx));
+          e.vy = Math.max(-dive, Math.min(dive, e.vy));
         } else {
           // reset swoop cooldown
-          e.swoopT = 2 + Math.random() * 3;
+          e.swoopT = storm ? 4 + Math.random() * 1.5 : bossFlyer ? 3 + Math.random() * 2 : 2 + Math.random() * 3;
         }
-        // collide with solid tiles (so bats can't fly through your walls)
+        // collide with solid tiles (so flyers can't pass through your walls)
         this.flyCollide(e, dt);
-        e.y += Math.sin(e.t * 8) * 1.2;
+        e.y += Math.sin(e.t * (bossFlyer ? 4 : 8)) * 1.2;
       } else {
         // ground physics + hop
         e.vy += GRAVITY * dt;
@@ -1807,13 +3030,21 @@ export class Engine {
       // contact damage
       const overlap = Math.abs(e.x - this.px) < (e.w / 2 + 9) && Math.abs(e.y - this.py) < (e.h / 2 + 22);
       if (overlap && this.invuln <= 0) {
-        this.hurt(e.type === "king" ? 22 : e.type === "zombie" ? 14 : 8);
+        const dmg =
+          e.type === "king" ? 22
+          : e.type === "storm" ? 24
+          : e.type === "auditor" ? 18
+          : e.type === "herald" ? 16
+          : e.type === "zombie" ? 14
+          : e.type === "wisp" ? 6
+          : 8;
+        this.hurt(dmg);
       }
-      // despawning: far away enemies are removed
+      // despawning: far away enemies are removed (bosses stay)
       const dist = Math.abs(e.x - this.px);
-      if (dist > this.viewW * 2) {
+      if (dist > this.viewW * 2 && e.type !== "king" && e.type !== "herald") {
         this.enemies.splice(i, 1);
-      } else if (dist > this.viewW) {
+      } else if (dist > this.viewW && e.type !== "king" && e.type !== "herald") {
         if (Math.random() < 0.005) {
           this.enemies.splice(i, 1);
         }
@@ -1925,11 +3156,34 @@ export class Engine {
       case 9: done = this.count("crown") >= 1; break;
       case 10: done = this.kingDefeated; break;
       // Chapter II
-      case 11: done = this.heirFed >= 5; break;
-      case 12: done = this.shardsFound >= 1; break;
-      case 13: done = this.shardsFound >= 2; break;
-      case 14: done = this.shardsFound >= 3; break;
-      // case 15 (The Vigil) is completed by approaching the Hollow Gate.
+      case C2_CLOUDPATH: {
+        const l = this.sky ?? skyLayout(this.world);
+        done = this.px >= (l.islands[1].x - 4) * TILE;
+        break;
+      }
+      case C2_FEED: done = this.heirFed >= 5; break;
+      case C2_MOTES: done = this.moteCount() >= 3; break;
+      case C2_NAME: done = this.heirFed >= 8; break;
+      case C2_WISPS: done = this.wispsKilled >= 5; break;
+      case C2_ESSENCE: done = this.count("essence") >= 8; break;
+      case C2_BLADE: done = this.count("skyblade") >= 1; break;
+      case C2_SHRINES: done = this.shrinesLit() >= 3; break;
+      case C2_SHARD1: done = this.shardsFound >= 1; break;
+      case C2_TOLL: done = this.tollPaid; break;
+      case C2_SIGIL: done = this.sigilFound; break;
+      case C2_AUDITOR: done = this.auditorDefeated; break;
+      case C2_UNDERSKY: done = this.pageCount() >= 3; break;
+      case C2_CHIMES: done = this.chimeStep >= CHIME_ORDER.length; break;
+      case C2_SHARD2: done = this.shardsFound >= 2; break;
+      case C2_SIEGE: done = this.siegeDone; break;
+      case C2_HERALD: done = this.heraldDefeated; break;
+      case C2_TRUST: done = this.heirFed >= SECRET_TRUST; break;
+      case C2_SHARD3: done = this.shardsFound >= 3; break;
+      case C2_STORM: done = this.stormDefeated; break;
+      case C2_WITNESS: done = this.witnessCount() >= 4; break;
+      case C2_CONFESSION: done = this.confessionSeen; break;
+      case C2_BELL: done = this.bellRung; break;
+      // C2_LAST is completed by the final story at the summit.
     }
     if (!done) return;
     // reward
@@ -1940,20 +3194,49 @@ export class Engine {
       case 5: this.addItem("wood_sword", 1); break;
       case 6: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
       case 8: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
-      case 11: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
-      case 12: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
-      case 13: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
-      case 14: this.addItem("gel", 10); break;
+      case C2_CLOUDPATH: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_FEED: this.addItem("gel", 5); break;
+      case C2_MOTES: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_NAME: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_WISPS: this.addItem("gel", 5); break;
+      case C2_ESSENCE: this.addItem("torch", 6); break;
+      case C2_BLADE: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_SHRINES: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_SHARD1: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_TOLL: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_SIGIL: this.addItem("gel", 5); break;
+      case C2_AUDITOR: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_UNDERSKY: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_CHIMES: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_SHARD2: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_SIEGE: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_HERALD: this.addItem("gel", 10); break;
+      case C2_TRUST: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_SHARD3: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_STORM: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case C2_WITNESS: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_CONFESSION: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case C2_BELL: this.addItem("gel", 10); break;
     }
     audio.playSfx("levelup");
     this.showBanner("QUEST COMPLETE", q.title);
     this.float(this.px, this.py - 40, q.reward, "#9fff9f");
     this.questIndex++;
-    if (this.questIndex === 12) {
+    if (this.questIndex === C2_MOTES && !this.c2Act2Seen) {
       // Feeding the heir opens Act II.
+      this.c2Act2Seen = true;
       this.triggerStory("c2_act2");
-    } else if (this.questIndex === 15) {
-      this.showBanner("THE VIGIL", "The Hollow Gate has risen to the east");
+    } else if (this.questIndex === C2_NAME && !this.c2NameSeen) {
+      this.c2NameSeen = true;
+      this.triggerStory("c2_heir_name");
+    } else if (this.questIndex === C2_SHARD3 && !this.c2TrustSeen) {
+      this.c2TrustSeen = true;
+      this.triggerStory("c2_heir_trust");
+    } else if (this.questIndex === C2_STORM && !this.c2Act3Seen) {
+      this.c2Act3Seen = true;
+      this.triggerStory("c2_act3");
+    } else if (this.questIndex === C2_LAST) {
+      this.showBanner("THE SUMMIT", "Mira waits where the sky ends");
     }
     this.saveGame();
     this.pushState();
@@ -2042,7 +3325,12 @@ export class Engine {
       if (ok) craftable.push(r.id);
     }
     const q = QUESTS[this.questIndex];
-    const boss = this.enemies.find((e) => e.type === "king");
+    const boss = this.enemies.find((e) => e.type === "king" || e.type === "herald" || e.type === "auditor" || e.type === "storm");
+    const bossName =
+      boss?.type === "herald" ? "Hollow Herald"
+      : boss?.type === "auditor" ? "The Auditor"
+      : boss?.type === "storm" ? "The Stormfather"
+      : "Slime King";
     const pxTile = Math.floor(this.px / TILE);
     const pyTile = Math.floor(this.py / TILE);
     let nearPortal = false;
@@ -2052,6 +3340,14 @@ export class Engine {
       }
       if (nearPortal) break;
     }
+    let c2Track: EngineState["c2Track"] = null;
+    if (this.c2Active && !this.c2Ending && this.questIndex === C2_TOLL && !this.tollPaid) {
+      const l = this.sky ?? skyLayout(this.world);
+      const dx = (l.toll.x + 0.5) * TILE - this.px;
+      const dy = (l.toll.y + 0.5) * TILE - this.py;
+      c2Track = { x: l.toll.x, y: l.toll.y, dist: Math.hypot(dx, dy) / TILE, coins: this.coinCount(), total: l.coins.length };
+    }
+    const nearChime = this.questIndex === C2_CHIMES && this.chimeStep < CHIME_ORDER.length && this.chimeInReach() >= 0;
     this.cb.onState({
       hp: Math.round(this.hp),
       maxHp: this.maxHp,
@@ -2065,7 +3361,7 @@ export class Engine {
       questDone: this.questIndex >= QUESTS.length,
       questIndex: this.questIndex,
       banner: this.banner,
-      boss: boss ? { name: "Slime King", hp: Math.max(0, boss.hp), maxHp: boss.maxHp } : null,
+      boss: boss ? { name: bossName, hp: Math.max(0, boss.hp), maxHp: boss.maxHp } : null,
       mineProgress: this.mineTX >= 0 ? Math.min(1, this.mineProg / (TILES[getTile(this.world, this.mineTX, this.mineTY)]?.hp || 1)) : 0,
       inventory: this.inv.map((s) => (s ? { id: s.id, count: s.count } : null)),
       stations: { workbench: this.workbenchCount > 0, furnace: this.furnaceCount > 0 },
@@ -2080,6 +3376,8 @@ export class Engine {
       shardsFound: this.shardsFound,
       ending: this.c2Ending,
       story: this.storyId,
+      c2Track,
+      nearChime,
     });
   }
 
@@ -2091,6 +3389,7 @@ export class Engine {
     const night = this.isNightNow();
     const bright = Math.max(0.1, Math.sin(this.dayFrac * Math.PI * 2));
     this.drawSky(ctx, bright, night);
+    if (this.inSky()) this.drawSkyClouds(ctx);
 
     const tx0 = Math.max(0, Math.floor(this.camX / TILE) - 1);
     const ty0 = Math.max(0, Math.floor(this.camY / TILE) - 1);
@@ -2169,7 +3468,12 @@ export class Engine {
     }
     ctx.globalAlpha = 1;
     for (const e of this.enemies) this.drawEnemy(ctx, e);
+    if (this.c2Active && !this.c2Ending && this.sky) {
+      this.drawSummitBeam(ctx);
+      this.drawSkyQuestObjects(ctx);
+    }
     this.drawHeir(ctx);
+    if (this.c2Active && !this.c2Ending) this.drawMira(ctx);
     if (!this.gameover) this.drawPlayer(ctx);
 
     // floating text (smooth)
@@ -2218,6 +3522,11 @@ export class Engine {
     vg.addColorStop(1, "rgba(0,0,0,0.45)");
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, this.viewW, this.viewH);
+
+    if (this.flashT > 0) {
+      ctx.fillStyle = `rgba(236,248,255,${Math.min(0.92, this.flashT * 0.85)})`;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
 
     // FPS overlay (toggle: Ctrl + Win + Alt)
     if (this.showFps) {
@@ -2290,18 +3599,12 @@ export class Engine {
           const r = TILE * 1.7 * fl;
           ctx.globalAlpha = 0.2 * fl;
           ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
+        } else if (id === SKY_SPIRE) {
+          const fl = 0.8 + 0.2 * Math.sin(this.frame * 0.04 + tx * 0.8);
+          const r = TILE * 1.3 * fl;
+          ctx.globalAlpha = 0.14 * fl;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
         }
-      }
-    }
-    // gate beacon — a violet pillar rising from the monument
-    if (this.gatePos && this.c2Active && !this.c2Ending) {
-      const gx = this.gatePos.x * TILE + TILE / 2;
-      const gy = this.gatePos.y * TILE;
-      for (let i = 0; i < 4; i++) {
-        const r = TILE * (1.7 + i * 1.0);
-        const a = 0.085 * (1 - i / 4) * (0.8 + 0.2 * Math.sin(this.frame * 0.05 + i));
-        ctx.globalAlpha = a;
-        ctx.drawImage(spr, 0, 0, spr.width, spr.height, gx - r, gy - TILE * 5 - i * TILE * 1.2 - r, r * 2, r * 2);
       }
     }
     ctx.globalAlpha = 1;
@@ -3017,11 +4320,12 @@ export class Engine {
     const rage = e.type === "king" && e.hp < e.maxHp / 2;
     const OL = "#0a0f06";
     // drop shadow
+    const flyer = e.type === "bat" || e.type === "wisp" || e.type === "herald" || e.type === "auditor" || e.type === "storm";
     ctx.save();
-    ctx.globalAlpha = e.type === "bat" ? 0.1 : 0.26;
+    ctx.globalAlpha = flyer ? 0.1 : 0.26;
     ctx.fillStyle = "#000";
     ctx.beginPath();
-    ctx.ellipse(e.x, e.y + e.h / 2 + 2, e.w * 0.5, e.type === "bat" ? 3 : 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(e.x, e.y + e.h / 2 + 2, e.w * 0.5, flyer ? 3 : 5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -3167,6 +4471,177 @@ export class Engine {
       ctx.fillStyle = "#ff3b3b";
       ctx.fillRect(-4, -1, 2, 2);
       ctx.fillRect(2, -1, 2, 2);
+    } else if (e.type === "wisp" || e.type === "herald") {
+      const big = e.type === "herald";
+      const r = big ? 24 : 11;
+      // cold aura
+      const aura = ctx.createRadialGradient(0, 0, 1, 0, 0, r * 2.7);
+      aura.addColorStop(0, big ? "rgba(140,225,255,0.5)" : "rgba(180,250,240,0.45)");
+      aura.addColorStop(1, "rgba(90,200,255,0)");
+      ctx.fillStyle = aura;
+      ctx.fillRect(-r * 2.7, -r * 2.7, r * 5.4, r * 5.4);
+      // wings
+      const flap = Math.sin(e.t * (big ? 7 : 13)) * (big ? 7 : 4);
+      ctx.fillStyle = flash ? "#fff" : big ? "rgba(120,190,235,0.85)" : "rgba(210,255,245,0.8)";
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(s * r * 0.4, -r * 0.2);
+        ctx.quadraticCurveTo(s * r * 2.2, -flap - r, s * r * 1.35, r * 0.55);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // body
+      const body = ctx.createRadialGradient(-r * 0.3, -r * 0.4, 1, 0, 0, r);
+      body.addColorStop(0, big ? "#dff7ff" : "#f0fffb");
+      body.addColorStop(0.5, big ? "#6fa8cc" : "#8fe8d8");
+      body.addColorStop(1, big ? "#2f5a7a" : "#3fa89e");
+      ctx.fillStyle = flash ? "#fff" : body;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r, r * 0.82, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // eyes
+      ctx.fillStyle = big ? "#ff5a7a" : "#16303a";
+      ctx.fillRect(-r * 0.42, -r * 0.14, big ? 3 : 2, big ? 4 : 3);
+      ctx.fillRect(r * 0.18, -r * 0.14, big ? 3 : 2, big ? 4 : 3);
+      if (big) {
+        // the Collector's hollow crown
+        ctx.fillStyle = "#c4b5fd";
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.72, -r * 0.55);
+        ctx.lineTo(-r * 0.45, -r * 1.12);
+        ctx.lineTo(-r * 0.14, -r * 0.65);
+        ctx.lineTo(r * 0.16, -r * 1.2);
+        ctx.lineTo(r * 0.44, -r * 0.65);
+        ctx.lineTo(r * 0.72, -r * 1.05);
+        ctx.lineTo(r * 0.72, -r * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // drifting trail
+      for (let i = 0; i < (big ? 5 : 3); i++) {
+        const a = e.t * 2 + i * 1.7;
+        ctx.fillStyle = big ? "rgba(190,235,255,0.5)" : "rgba(220,255,250,0.6)";
+        ctx.fillRect(Math.cos(a) * r * 1.2 - 1, Math.sin(a) * r * 0.9 + r * 0.8, 2, 2);
+      }
+    } else if (e.type === "auditor") {
+      const bob = Math.sin(e.t * 2.2) * 2;
+      // cold halo of arithmetic
+      const halo = ctx.createRadialGradient(0, bob, 2, 0, bob, 54);
+      halo.addColorStop(0, "rgba(255,232,168,0.22)");
+      halo.addColorStop(1, "rgba(255,210,110,0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(-54, -54, 108, 108);
+      // robe
+      ctx.fillStyle = OL;
+      ctx.beginPath();
+      ctx.moveTo(-14, -30 + bob);
+      ctx.lineTo(14, -30 + bob);
+      ctx.lineTo(22, 24 + bob);
+      ctx.lineTo(-22, 24 + bob);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = flash ? "#fff" : "#2f2a3d";
+      ctx.beginPath();
+      ctx.moveTo(-12, -29 + bob);
+      ctx.lineTo(12, -29 + bob);
+      ctx.lineTo(19, 22 + bob);
+      ctx.lineTo(-19, 22 + bob);
+      ctx.closePath();
+      ctx.fill();
+      // gold trim
+      ctx.strokeStyle = "rgba(255,214,120,0.7)";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-18, 20 + bob);
+      ctx.lineTo(-10, -27 + bob);
+      ctx.moveTo(18, 20 + bob);
+      ctx.lineTo(10, -27 + bob);
+      ctx.stroke();
+      // mask
+      ctx.fillStyle = OL;
+      ctx.fillRect(-13, -48 + bob, 26, 22);
+      ctx.fillStyle = flash ? "#fff" : "#e8ddc4";
+      ctx.fillRect(-12, -47 + bob, 24, 20);
+      ctx.fillStyle = "#2f2a3d";
+      ctx.fillRect(-8, -41 + bob, 6, 4);
+      ctx.fillRect(2, -41 + bob, 6, 4);
+      ctx.fillStyle = "#ffb84d";
+      ctx.fillRect(-7, -40 + bob, 4, 2);
+      ctx.fillRect(3, -40 + bob, 4, 2);
+      ctx.fillStyle = OL;
+      ctx.fillRect(-4, -33 + bob, 8, 2);
+      // scales of the debt
+      ctx.strokeStyle = "#f3d58a";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-22, -8 + bob);
+      ctx.lineTo(22, -8 + bob);
+      ctx.moveTo(0, -8 + bob);
+      ctx.lineTo(0, 4 + bob);
+      ctx.stroke();
+      ctx.fillStyle = "#f3d58a";
+      ctx.beginPath();
+      ctx.arc(-22, -5 + bob, 4.5, 0, Math.PI * 2);
+      ctx.arc(22, -5 + bob, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8a6a2a";
+      ctx.fillRect(-2, 4 + bob, 4, 8);
+    } else if (e.type === "storm") {
+      const bob = Math.sin(e.t * 1.4) * 3;
+      // the storm body
+      const g = ctx.createRadialGradient(-8, -8 + bob, 4, 0, bob, 52);
+      g.addColorStop(0, flash ? "#fff" : "#e6f2ff");
+      g.addColorStop(0.45, flash ? "#fff" : "#8fa9c4");
+      g.addColorStop(1, flash ? "#fff" : "#3d5470");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, bob, 38, 26, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-22, 6 + bob, 20, 16, 0, 0, Math.PI * 2);
+      ctx.ellipse(22, 6 + bob, 22, 17, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(0, -16 + bob, 22, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // lightning cracks
+      ctx.strokeStyle = "rgba(255,238,150,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-12, -4 + bob);
+      ctx.lineTo(-4, 6 + bob);
+      ctx.lineTo(-9, 8 + bob);
+      ctx.lineTo(2, 20 + bob);
+      ctx.stroke();
+      // storm eyes and mouth
+      ctx.fillStyle = "#12202c";
+      ctx.fillRect(-14, -6 + bob, 8, 5);
+      ctx.fillRect(6, -6 + bob, 8, 5);
+      ctx.fillStyle = "#ffe98a";
+      ctx.fillRect(-12, -5 + bob, 4, 2);
+      ctx.fillRect(8, -5 + bob, 4, 2);
+      ctx.fillStyle = "rgba(10,20,30,0.75)";
+      ctx.beginPath();
+      ctx.ellipse(0, 10 + bob, 10, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // cloudstone crown
+      ctx.fillStyle = "#c3d9ea";
+      ctx.beginPath();
+      ctx.moveTo(-20, -26 + bob);
+      ctx.lineTo(-12, -42 + bob);
+      ctx.lineTo(-4, -28 + bob);
+      ctx.lineTo(4, -44 + bob);
+      ctx.lineTo(12, -28 + bob);
+      ctx.lineTo(20, -40 + bob);
+      ctx.lineTo(22, -22 + bob);
+      ctx.closePath();
+      ctx.fill();
+      // rain
+      for (let i = 0; i < 6; i++) {
+        const ry = ((e.t * 90 + i * 23) % 70) - 5;
+        ctx.fillStyle = "rgba(170,215,255,0.55)";
+        ctx.fillRect(-30 + i * 12 + Math.sin(e.t + i) * 2, ry + bob, 1.5, 6);
+      }
     }
     ctx.restore();
   }

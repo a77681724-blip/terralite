@@ -118,9 +118,9 @@ export function initSprites(): void {
     fc.drawImage(img, 0, 0);
     keyBackground(fc, W, H);
 
-    // 2. slice into N vertical cells, auto-trim each to its content
+    // 2. segment the atlas by empty columns: the characters are not aligned to
+    // equal fifths, and some limbs cross the fifths, so cell cuts are unsafe
     const N = ORDER.length;
-    const cellW = Math.floor(W / N);
     let raw: ImageData;
     try {
       raw = fc.getImageData(0, 0, W, H);
@@ -128,18 +128,49 @@ export function initSprites(): void {
       // tainted canvas — bail
       return;
     }
-    for (let i = 0; i < N; i++) {
-      const box = contentBox(raw.data, W, i * cellW, 0, cellW, H);
-      // pad a little
-      const pad = 2;
-      const pb = {
-        x: Math.max(0, box.x - pad),
-        y: Math.max(0, box.y - pad),
-        w: Math.min(cellW - box.x, box.w + pad * 2),
-        h: Math.min(H - box.y, box.h + pad * 2),
-      };
-      const spr = cropTo(full, pb);
-      cache.set(ORDER[i], { img: spr, white: makeWhite(spr) });
+    const colHas = new Uint8Array(W);
+    for (let x = 0; x < W; x++) {
+      for (let y = 0; y < H; y++) {
+        if (raw.data[(y * W + x) * 4 + 3] > 40) { colHas[x] = 1; break; }
+      }
+    }
+    const runs: Array<{ x: number; w: number }> = [];
+    let runStart = -1;
+    for (let x = 0; x <= W; x++) {
+      const on = x < W && colHas[x] === 1;
+      if (on && runStart < 0) runStart = x;
+      else if (!on && runStart >= 0) {
+        runs.push({ x: runStart, w: x - runStart });
+        runStart = -1;
+      }
+    }
+    const parts = runs.filter((r) => r.w > 24);
+    if (parts.length === N) {
+      for (let i = 0; i < N; i++) {
+        const r = parts[i];
+        const box = contentBox(raw.data, W, r.x, 0, r.w, H);
+        const pad = 2;
+        const x0 = Math.max(0, box.x - pad);
+        const y0 = Math.max(0, box.y - pad);
+        const x1 = Math.min(r.w, box.x + box.w + pad);
+        const y1 = Math.min(H, box.y + box.h + pad);
+        const spr = cropTo(full, { x: r.x + x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        cache.set(ORDER[i], { img: spr, white: makeWhite(spr) });
+      }
+    } else {
+      // fallback: equal cells with a gutter against neighbour bleed
+      const cellW = Math.floor(W / N);
+      const inset = Math.ceil(cellW * 0.1);
+      for (let i = 0; i < N; i++) {
+        const box = contentBox(raw.data, W, i * cellW + inset, 0, cellW - inset * 2, H);
+        const pad = 2;
+        const x0 = Math.max(0, box.x - pad);
+        const y0 = Math.max(0, box.y - pad);
+        const x1 = Math.min(cellW - inset * 2, box.x + box.w + pad);
+        const y1 = Math.min(H, box.y + box.h + pad);
+        const spr = cropTo(full, { x: i * cellW + inset + x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        cache.set(ORDER[i], { img: spr, white: makeWhite(spr) });
+      }
     }
     listeners.forEach((l) => l());
   };

@@ -8,6 +8,7 @@ import MobileGate, { goFullscreen, isMobileDevice } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
 import EndingSequence from "./EndingSequence";
 import Chapter2Ending from "./Chapter2Ending";
+import Aftermath from "./Aftermath";
 import StoryOverlay from "./StoryOverlay";
 import { SECRET_TRUST, type EndingId } from "./story";
 import LanguagePicker from "./LanguagePicker";
@@ -159,6 +160,14 @@ function Minimap({ engineRef, state }: { engineRef: React.MutableRefObject<Engin
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(ptx - 1, yOff + pty - 1, 3, 3);
 
+      if (state.c2Track) {
+        const mx = Math.floor(state.c2Track.x / scale);
+        const my = Math.floor(state.c2Track.y / scale);
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 200);
+        ctx.fillStyle = `rgba(255,210,59,${0.45 + 0.55 * pulse})`;
+        ctx.fillRect(mx - 1, yOff + my - 1, 3, 3);
+      }
+
       rafRef.current = requestAnimationFrame(render);
     };
     rafRef.current = requestAnimationFrame(render);
@@ -300,6 +309,20 @@ function Hud({
           <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{tQuest(s.questIndex).title}</div>
           <div className="text-[11px] text-white/60 sm:text-xs leading-tight">{tQuest(s.questIndex).text}</div>
         </div>
+        {s.c2Track && (() => {
+          const angle = Math.atan2(s.c2Track.y + 0.5 - s.playerTY, s.c2Track.x + 0.5 - s.playerTX);
+          return (
+            <div className="pointer-events-none flex w-40 items-center justify-between gap-1 rounded-lg border border-amber-300/35 bg-black/60 px-2 py-1 text-[10px] text-amber-100 backdrop-blur-sm sm:w-56 sm:text-xs">
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="inline-block text-[11px] leading-none" style={{ transform: `rotate(${angle}rad)` }}>➤</span>
+                <span className="truncate font-semibold">{t("toll_tracker")}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-white/80">
+                {Math.max(1, Math.round(s.c2Track.dist))} {t("unit_m")} · 🪙{s.c2Track.coins}/{s.c2Track.total}
+              </span>
+            </div>
+          );
+        })()}
         {s.c2Active && !s.ending && (
           <div className="pointer-events-none rounded-lg border border-emerald-300/25 bg-black/55 px-2 py-1 text-[10px] text-emerald-200/90 backdrop-blur-sm">
             🟢 {t("c2_heir")} <span className={`font-bold ${s.heirFed >= SECRET_TRUST ? "text-amber-200" : "text-white/90"}`}>{s.heirFed}/{SECRET_TRUST}</span>
@@ -310,7 +333,12 @@ function Hud({
       {/* boss bar */}
       {s.boss && (
         <div className="absolute bottom-44 left-1/2 w-[80%] max-w-xl -translate-x-1/2 sm:bottom-24">
-          <div className="mb-1 text-center text-xs font-semibold text-emerald-200 sm:text-sm">{t("slime_king")}</div>
+          <div className="mb-1 text-center text-xs font-semibold text-emerald-200 sm:text-sm">
+            {s.boss.name === "Slime King" ? t("slime_king")
+              : s.boss.name === "Hollow Herald" ? t("c2_herald_name")
+              : s.boss.name === "The Auditor" ? t("c2_auditor_name")
+              : t("c2_storm_name")}
+          </div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/70 ring-1 ring-emerald-400/30 sm:h-3">
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-lime-400 transition-[width] duration-150" style={{ width: `${(s.boss.hp / s.boss.maxHp) * 100}%` }} />
           </div>
@@ -432,8 +460,10 @@ function TouchBtn({
 
 function TouchControls({
   engineRef,
+  nearChime,
 }: {
   engineRef: React.MutableRefObject<Engine | null>;
+  nearChime: boolean;
 }) {
   const btn =
     "pointer-events-auto select-none flex items-center justify-center rounded-full border border-white/25 bg-black/40 backdrop-blur-sm active:bg-white/30";
@@ -460,6 +490,27 @@ function TouchControls({
           ▶
         </TouchBtn>
       </div>
+
+      {/* chime — appears only while a Chapter II bell is within reach */}
+      {nearChime && (
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            right: "calc(26px + env(safe-area-inset-right))",
+            bottom: "calc(148px + env(safe-area-inset-bottom))",
+          }}
+        >
+          <TouchBtn
+            onDown={() => engineRef.current?.ringNearbyChime()}
+            onUp={noop}
+            className={`${btn} h-16 w-16 flex-col gap-0.5 border-cyan-200/70 bg-cyan-400/30 text-cyan-50 shadow-[0_0_22px_rgba(120,235,255,0.45)]`}
+            title={t("chime_ring")}
+          >
+            <span className="text-2xl leading-none">🔔</span>
+            <span className="text-[9px] font-semibold uppercase tracking-wide">{t("chime_ring")}</span>
+          </TouchBtn>
+        </div>
+      )}
 
       {/* actions — bottom right, also clear of the right-edge gesture zone */}
       <div
@@ -812,6 +863,7 @@ export default function App() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [cheatOpen, setCheatOpen] = useState(false);
   const [ended, setEnded] = useState<null | "over" | "win">(null);
+  const [aftermath, setAftermath] = useState(false);
   const [bestDay, setBestDay] = useState<number>(() => parseInt(ls.get("terralite_bestday", "0"), 10) || 0);
   const [musicOn, setMusicOn] = useState<boolean>(() => ls.get("terralite_music", "1") !== "0");
   const [sfxOn, setSfxOn] = useState<boolean>(() => ls.get("terralite_sfx", "1") !== "0");
@@ -850,6 +902,14 @@ export default function App() {
     engineRef.current?.setUiOpen(invOpen || cheatOpen || !!state?.story);
     engineRef.current?.setPaused(pauseOpen);
   }, [invOpen, pauseOpen, cheatOpen, state?.story]);
+
+  // a story card owns the screen until it is dismissed
+  useEffect(() => {
+    if (state?.story) {
+      setInvOpen(false);
+      setPauseOpen(false);
+    }
+  }, [state?.story]);
 
   const onState = useCallback((s: EngineState) => {
     if (prevHpRef.current > 0 && s.hp < prevHpRef.current) {
@@ -931,6 +991,16 @@ export default function App() {
   };
   const continueInWorld = () => {
     click();
+    engineRef.current?.resumeAfterVictory();
+    setEnded(null);
+    setScreen("playing");
+  };
+  const continueIntoAftermath = () => {
+    click();
+    setAftermath(true);
+  };
+  const finishAftermath = () => {
+    setAftermath(false);
     engineRef.current?.resumeAfterVictory();
     setEnded(null);
     setScreen("playing");
@@ -1030,7 +1100,13 @@ export default function App() {
           {isTouch && state && !ended && !invOpen && !pauseOpen && !state.story && (
             <TouchControls
               engineRef={engineRef}
+              nearChime={!!state.nearChime}
             />
+          )}
+          {state && !ended && state.nearChime && !isTouch && !invOpen && !pauseOpen && !state.story && (
+            <div className="pointer-events-none absolute bottom-28 left-1/2 z-10 -translate-x-1/2 animate-pulse rounded-xl border border-cyan-300/40 bg-cyan-950/70 px-5 py-2 text-sm font-semibold text-cyan-100 shadow-lg backdrop-blur-sm">
+              🔔 {t("chime_hint")}
+            </div>
           )}
           {state && !ended && state.nearPortal && !invOpen && !pauseOpen && !state.story && (
             <div className="absolute left-1/2 top-[12%] z-10 -translate-x-1/2 animate-pulse rounded-xl border border-purple-400/40 bg-purple-900/60 px-5 py-2 text-sm font-semibold text-purple-100 shadow-lg backdrop-blur-sm">
@@ -1108,18 +1184,17 @@ export default function App() {
               </div>
             </div>
           )}
-          {ended === "win" && state && c2Ending && (
-            <Chapter2Ending ending={c2Ending} onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
+          {ended === "win" && state && c2Ending && !aftermath && (
+            <Chapter2Ending ending={c2Ending} onContinueWorld={continueIntoAftermath} onNewWorld={retry} onMenu={toMenu} />
           )}
           {ended === "win" && state && !c2Ending && (
             <EndingSequence onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
           )}
+          {aftermath && <Aftermath onDone={finishAftermath} />}
           {state?.story && !ended && (
             <StoryOverlay
               storyId={state.story}
-              heirFed={state.heirFed}
               onAdvance={() => engineRef.current?.dismissStory()}
-              onChoose={(id) => engineRef.current?.chooseEnding(id)}
             />
           )}
           {ended === "over" && state && (
