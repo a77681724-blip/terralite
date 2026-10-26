@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LANGS, setLang, getLang, type Lang } from "./i18n";
+import { Flag } from "./flags";
 import sandboxBg from "./assets/sandbox-bg.jpg";
 
 /** First-visit language picker modal. */
@@ -29,7 +30,7 @@ export default function LanguagePicker({ onDone }: { onDone: (l: Lang) => void }
                   : "border-white/15 bg-white/5 hover:bg-white/10"
               }`}
             >
-              <span className="text-3xl">{l.flag}</span>
+              <Flag code={l.code} className="h-8 w-12 rounded-md shadow-[0_2px_10px_rgba(0,0,0,0.5)]" />
               <span className="text-lg font-semibold">{l.label}</span>
               {picked === l.code && <span className="ml-auto text-amber-300">✓</span>}
             </button>

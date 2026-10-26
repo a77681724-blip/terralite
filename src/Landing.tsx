@@ -3,6 +3,7 @@ import sandboxBg from "./assets/sandbox-bg.jpg";
 import skyBg from "./assets/bg_sky.jpg";
 import atlasBg from "./assets/char_atlas.jpg";
 import { useT, t, LANGS, getLang, setLang } from "./i18n";
+import { Flag } from "./flags";
 import { Engine } from "./engine";
 
 /* scroll-reveal wrapper */
@@ -35,6 +36,48 @@ function Reveal({ children, delay = 0, className = "" }: { children: React.React
 
 function scrollToId(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Flag dropdown: native <select> cannot render flag images. */
+function LangSelect() {
+  const [open, setOpen] = useState(false);
+  const lang = getLang();
+  const cur = LANGS.find((l) => l.code === lang) ?? LANGS[0];
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Language"
+        className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70"
+      >
+        <Flag code={cur.code} className="h-3.5 w-5 rounded-[2px]" />
+        {cur.label}
+        <span className="text-[9px] text-white/40">▼</span>
+      </button>
+      {open && (
+        <>
+          <button className="fixed inset-0 z-40 cursor-default" aria-label="Close" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-white/15 bg-[#0b0f1a] shadow-2xl">
+            {LANGS.map((l) => (
+              <button
+                key={l.code}
+                onClick={() => {
+                  setLang(l.code);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-xs transition-colors ${
+                  l.code === lang ? "bg-amber-400/15 text-amber-100" : "text-white/75 hover:bg-white/10"
+                }`}
+              >
+                <Flag code={l.code} className="h-4 w-6 rounded-[2px]" />
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 const motes = Array.from({ length: 18 }, () => ({ left: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 10, size: 2 + Math.random() * 4 }));
@@ -274,18 +317,7 @@ export default function Landing({ onPlay, onContinue, onSelectWorld, onChapter2 
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <select
-              value={getLang()}
-              onChange={(e) => setLang(e.target.value as any)}
-              className="rounded-lg border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-white/80 outline-none"
-              title="Language"
-            >
-              {LANGS.map((l) => (
-                <option key={l.code} value={l.code} className="bg-[#0b0f1a]">
-                  {l.flag} {l.label}
-                </option>
-              ))}
-            </select>
+            <LangSelect />
             {hasSave && onContinue && (
               <button
                 onClick={onContinue}

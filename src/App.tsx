@@ -11,6 +11,7 @@ import Chapter2Ending from "./Chapter2Ending";
 import StoryOverlay from "./StoryOverlay";
 import { SECRET_TRUST, type EndingId } from "./story";
 import LanguagePicker from "./LanguagePicker";
+import { Flag } from "./flags";
 import { useT, t, tItem, tItemDesc, tQuest, getLang, setLang, hasChosenLang, LANGS } from "./i18n";
 
 type Screen = "landing" | "title" | "story" | "howto" | "playing";
@@ -1091,9 +1092,9 @@ export default function App() {
                     <button
                       key={l.code}
                       onClick={() => setLang(l.code)}
-                      className={`rounded-lg border px-2.5 py-1 text-xs ${getLang() === l.code ? "border-amber-300 bg-amber-400/20 text-amber-100" : "border-white/15 bg-black/40 text-white/70 hover:bg-white/10"}`}
+                      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${getLang() === l.code ? "border-amber-300 bg-amber-400/20 text-amber-100" : "border-white/15 bg-black/40 text-white/70 hover:bg-white/10"}`}
                     >
-                      {l.flag} {l.label}
+                      <Flag code={l.code} className="h-3.5 w-5 rounded-[2px]" /> {l.label}
                     </button>
                   ))}
                 </div>

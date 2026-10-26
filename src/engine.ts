@@ -8,6 +8,7 @@ import {
   type World, type Recipe,
 } from "./world";
 import { audio } from "./audio";
+import { initSprites, getSprite } from "./sprites";
 import { tileTexture, wallTexture, TEX } from "./pixart";
 import { SECRET_TRUST } from "./story";
 import skyUrl from "./assets/bg_sky.jpg";
@@ -288,6 +289,7 @@ export class Engine {
     this.attach();
     this.resize();
     this.buildGlowSprite();
+    initSprites();
     // load painted sky backdrop
     const im = new Image();
     im.onload = () => {
@@ -607,6 +609,7 @@ export class Engine {
     this.attach();
     this.resize();
     this.buildGlowSprite();
+    initSprites();
     const im = new Image();
     im.onload = () => {
       const cv = document.createElement("canvas");
@@ -2736,7 +2739,12 @@ export class Engine {
 
     ctx.save();
     ctx.globalAlpha = blink ? 0.4 : 1;
-    this.drawWarden(ctx, x, y + bob, moving, airborne, this.pface, this.walkT);
+    const spr = getSprite("player");
+    if (spr) {
+      this.blitFeet(ctx, spr, x, y + 22 + bob, 56, this.pface, 1);
+    } else {
+      this.drawWarden(ctx, x, y + bob, moving, airborne, this.pface, this.walkT);
+    }
     ctx.restore();
 
     // tool / weapon in hand (drawn over the body)
@@ -2759,6 +2767,19 @@ export class Engine {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  /** Draw a sprite with its feet at footY, scaled to height h. */
+  private blitFeet(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, cx: number, footY: number, h: number, facing: number, sy: number) {
+    const sw = spr.width, sh = spr.height;
+    const scale = h / sh;
+    const dw = sw * scale;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(cx, footY);
+    ctx.scale(facing, sy);
+    ctx.drawImage(spr, 0, 0, sw, sh, -dw / 2, -h, dw, h);
+    ctx.restore();
   }
 
   /** Fully procedural animated Warden: walk cycle with swinging legs & arms,
