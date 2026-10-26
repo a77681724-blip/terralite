@@ -18,6 +18,7 @@ const GIVE_ITEMS: { id: string; n: number; label: string }[] = [
   { id: "gold_sword", n: 1, label: "⚔️ Зол. меч" },
   { id: "torch", n: 30, label: "🔥 Факелы ×30" },
   { id: "crown", n: 1, label: "👑 Корона" },
+  { id: "gel", n: 50, label: "🟢 Слизь ×50" },
 ];
 
 function Row({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }) {

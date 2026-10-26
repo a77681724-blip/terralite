@@ -60,7 +60,7 @@ function WorldPicker({
   }, [creating]);
 
   const createWorld = () => {
-    const name = nameInput.trim() || `World ${worlds.length + 1}`;
+    const name = nameInput.trim() || t("world_n").replace("{n}", String(worlds.length + 1));
     const id = Engine.createNewWorld(name);
     setNameInput("");
     setCreating(false);
@@ -176,7 +176,7 @@ function WorldPicker({
   );
 }
 
-export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay: () => void; onContinue?: () => void; onSelectWorld?: (id: number) => void }) {
+export default function Landing({ onPlay, onContinue, onSelectWorld, onChapter2 }: { onPlay: () => void; onContinue?: () => void; onSelectWorld?: (id: number) => void; onChapter2?: (id: number) => void }) {
   useT();
   const [navSolid, setNavSolid] = useState(false);
   const [scrollY, setScrollY] = useState(0);
@@ -185,6 +185,7 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
   const heroRef = useRef<HTMLDivElement | null>(null);
   const heroImgRef = useRef<HTMLImageElement | null>(null);
   const hasSave = Engine.hasSave();
+  const [chapter2World] = useState<number | null>(() => Engine.getChapter2WorldId());
 
   const handleScroll = useCallback(() => {
     const y = window.scrollY;
@@ -234,7 +235,7 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
     { icon: "👑", title: t("f6t"), text: t("f6d"), color: "from-yellow-500/20 to-amber-500/5" },
   ];
   const STATS = [
-    { v: "11", l: t("stat_quests") },
+    { v: "16", l: t("stat_quests") },
     { v: "17+", l: t("stat_blocks") },
     { v: "∞", l: t("stat_worlds") },
     { v: "1", l: t("stat_boss") },
@@ -342,6 +343,41 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
               className="rounded-2xl border border-white/25 bg-white/5 px-8 py-4 text-lg font-semibold text-white/90 backdrop-blur transition-colors hover:bg-white/15"
             >
               {t("learn_more")}
+            </button>
+          </div>
+
+          {/* ===== CHAPTER II ===== */}
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={() => {
+                if (chapter2World !== null) onChapter2?.(chapter2World);
+              }}
+              disabled={chapter2World === null}
+              title={chapter2World !== null ? t("c2_menu_open") : t("c2_menu_locked")}
+              className={`group flex w-full max-w-md items-center gap-3 rounded-2xl border px-5 py-3 text-left backdrop-blur transition-all ${
+                chapter2World !== null
+                  ? "border-emerald-300/40 bg-gradient-to-r from-emerald-500/20 via-emerald-800/20 to-black/30 shadow-[0_0_24px_rgba(80,220,140,0.18)] hover:scale-[1.02] hover:border-emerald-200/70 hover:bg-emerald-500/25"
+                  : "cursor-not-allowed border-white/10 bg-black/45"
+              }`}
+            >
+              <span
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-2xl ${
+                  chapter2World !== null ? "bg-emerald-400/20" : "bg-white/5 opacity-60 grayscale"
+                }`}
+              >
+                {chapter2World !== null ? "👑" : "🔒"}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-sm font-black tracking-wide ${chapter2World !== null ? "text-emerald-100" : "text-white/55"}`}>
+                  {t("c2_title")}
+                </span>
+                <span className={`block truncate text-[11px] ${chapter2World !== null ? "text-emerald-200/70" : "text-white/40"}`}>
+                  {chapter2World !== null ? t("c2_menu_open") : t("c2_menu_locked")}
+                </span>
+              </span>
+              <span className={`shrink-0 text-lg ${chapter2World !== null ? "text-emerald-200" : "text-white/25"}`}>
+                {chapter2World !== null ? "▶" : "🔒"}
+              </span>
             </button>
           </div>
 

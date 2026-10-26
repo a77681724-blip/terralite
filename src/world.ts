@@ -21,6 +21,9 @@ export const WORKBENCH = 16;
 export const FURNACE = 17;
 export const PORTAL = 21;
 export const WATER = 18;
+// Chapter II interactables
+export const SHARD = 22;
+export const HOLLOW_GATE = 23;
 
 export const TILE = 32; // 16px pixel-art source * 2 = crisp retro scaling
 export const WORLD_W = 480;
@@ -62,6 +65,8 @@ TILES[WORKBENCH] = { name: "Workbench", solid: true, color: "#9a6a3a", shade: "#
 TILES[FURNACE] = { name: "Furnace", solid: true, color: "#5a5560", shade: "#342f3a", light: 5, minTier: 0, hp: 8, drop: "furnace" };
 TILES[PORTAL] = { name: "Portal", solid: false, color: "#9b59b6", shade: "#6c3483", light: 8, minTier: 99, hp: 9999 };
 TILES[WATER] = { name: "Water", solid: false, color: "#3366cc", shade: "#1a3d8a", minTier: 99, hp: 9999 };
+TILES[SHARD] = { name: "Memory Shard", solid: false, color: "#8ff0ff", shade: "#3aa6c8", light: 11, minTier: 99, hp: 9999, bg: true };
+TILES[HOLLOW_GATE] = { name: "Hollow Gate", solid: false, color: "#241a33", shade: "#0b0712", light: 7, minTier: 99, hp: 9999, bg: true };
 
 function TilesGold(id: number, name: string, drop: string, speckle: string, hp: number, tier: number) {
   TILES[id] = { name, solid: true, color: "#8a8f9c", shade: "#5c606c", minTier: tier, hp, drop, speckle };

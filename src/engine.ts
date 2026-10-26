@@ -3,12 +3,13 @@
 
 import {
   AIR, STONE, WOOD, LEAVES, COPPER, IRON, TORCH, WORKBENCH, FURNACE, PORTAL,
+  BEDROCK, SHARD, HOLLOW_GATE,
   TILE, TILES, isSolid, ITEMS, RECIPES, generateWorld, getTile, setTile,
   type World, type Recipe,
 } from "./world";
 import { audio } from "./audio";
 import { tileTexture, wallTexture, TEX } from "./pixart";
-import { initSprites, getSprite } from "./sprites";
+import { SECRET_TRUST } from "./story";
 import skyUrl from "./assets/bg_sky.jpg";
 
 const REACH = 5; // tiles
@@ -20,6 +21,7 @@ const HOTBAR = 10;
 const INV_SIZE = 30;
 const SAVE_KEY_PREFIX = "terralite_save_v1_";
 const WORLD_LIST_KEY = "terralite_worlds";
+const LAST_WORLD_KEY = "terralite_last_world";
 
 function u8ToB64(arr: Uint8Array): string {
   let s = "";
@@ -63,11 +65,18 @@ export interface EngineState {
   savedAt: number;
   playerTX: number;
   playerTY: number;
+  // Chapter II — The Debt of Light
+  c2Active: boolean;
+  heirFed: number;
+  shardsFound: number;
+  ending: string | null;
+  story: string | null;
 }
 export interface EngineCallbacks {
   onState: (s: EngineState) => void;
   onGameOver: () => void;
   onVictory: () => void;
+  onStory?: (id: string) => void;
 }
 
 interface Enemy {
@@ -77,7 +86,7 @@ interface Enemy {
   facing: number; onGround: boolean; hopT: number; hitFlash: number; t: number;
   spawnT: number; knock: number; swoopT: number;
 }
-interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; }
+interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; ring?: boolean; sway?: number; }
 interface FloatText { x: number; y: number; vy: number; life: number; text: string; color: string; }
 
 interface QuestDef { title: string; text: string; done: string; reward: string; }
@@ -94,6 +103,12 @@ const QUESTS: QuestDef[] = [
   { title: "IX — Armed & Ready", text: "Craft an Iron Sword", done: "You are ready to face the night.", reward: "+20 Max HP" },
   { title: "X — The Slime Crown", text: "Craft a Slime Crown", done: "It pulses with the King's hunger.", reward: "Boss summon ready" },
   { title: "XI — King of Slimes", text: "Use the Crown at night & slay the King", done: "The realm is yours!", reward: "VICTORY" },
+  // Chapter II — The Debt of Light
+  { title: "XII — Last of the Line", text: "Feed the last slime 5 gel", done: "It remembers the sky.", reward: "The heir survives" },
+  { title: "XIII — The Ledger I", text: "Touch the first memory shard", done: "The First Warden's signature.", reward: "Memory I" },
+  { title: "XIV — The Ledger II", text: "Touch the second memory shard", done: "A payment plan made of light.", reward: "Memory II" },
+  { title: "XV — The Ledger III", text: "Touch the third memory shard", done: "The Order's lie is exposed.", reward: "Memory III" },
+  { title: "XVI — The Vigil", text: "Approach the Hollow Gate", done: "The debt is called.", reward: "The final choice" },
 ];
 
 export class Engine {
@@ -143,6 +158,7 @@ export class Engine {
   private swingT = 0;
   private attackCd = 0;
   private walkT = 0;
+  private stepDustT = 0;
 
   // mining
   private mineTX = -1;
@@ -184,6 +200,20 @@ export class Engine {
   private banner: { title: string; sub: string; key: number } | null = null;
   private bannerT = 0;
 
+  // Chapter II — The Debt of Light
+  private c2Active = false;
+  private c2Seen = false;
+  private c2Ending: string | null = null;
+  private heirFed = 0;
+  private shardsFound = 0;
+  private storyId: string | null = null;
+  private shardPos: { x: number; y: number; idx: number } | null = null;
+  private gatePos: { x: number; y: number } | null = null;
+  private heirX = 0;
+  private heirY = 0;
+  private heirHop = 0;
+  private portalMsgCd = 0;
+
   private stateT = 0;
   private frame = 0;
 
@@ -218,6 +248,7 @@ export class Engine {
 
   start(mode: "new" | "auto" = "auto", worldId?: number) {
     if (worldId !== undefined) this.currentWorldId = worldId;
+    Engine.setLastWorldId(this.currentWorldId);
     if (mode === "new") this.clearSave();
     const loaded = mode === "auto" ? this.loadGame() : null;
     if (loaded) {
@@ -257,7 +288,6 @@ export class Engine {
     this.attach();
     this.resize();
     this.buildGlowSprite();
-    initSprites();
     // load painted sky backdrop
     const im = new Image();
     im.onload = () => {
@@ -272,6 +302,11 @@ export class Engine {
     this.running = true;
     this.last = performance.now();
     this.showBanner(loaded ? "Welcome back" : QUESTS[0].title, loaded ? `Day ${this.dayCount} · auto-saved` : "Welcome, survivor");
+    this.ensureC2Objects();
+    if (this.c2Active && !this.c2Seen) {
+      this.triggerStory("c2_intro");
+      this.saveGame();
+    }
     this.raf = requestAnimationFrame((t) => this.loop(t));
   }
 
@@ -316,6 +351,7 @@ export class Engine {
       this.onGround = false;
       this.jumpBuffer = 0;
       audio.playSfx("jump");
+      for (let i = 0; i < 4; i++) this.dust(this.px, this.py + 20, "rgba(190,170,140,0.8)");
     } else {
       this.jumpBuffer = 0.18;
     }
@@ -431,6 +467,68 @@ export class Engine {
     return nextId;
   }
 
+  static getLastWorldId(): number | null {
+    try {
+      const raw = localStorage.getItem(LAST_WORLD_KEY);
+      if (raw === null) return null;
+      const id = Number(raw);
+      return Number.isFinite(id) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  static setLastWorldId(id: number) {
+    try {
+      localStorage.setItem(LAST_WORLD_KEY, String(id));
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * World that "Play Free" should open. Creates and registers one when the
+   * player has none, so the free world shows up in the Worlds tab.
+   */
+  static ensureFreeWorld(defaultName: string): number {
+    const list = Engine.getWorldList();
+    if (list.length === 0) {
+      // An old free-play save exists but was never listed — adopt it.
+      if (Engine.hasSaveForWorld(0)) {
+        Engine.saveWorldList([{ id: 0, name: defaultName }]);
+        return 0;
+      }
+      return Engine.createNewWorld(defaultName);
+    }
+    const last = Engine.getLastWorldId();
+    if (last !== null && list.some((w) => w.id === last)) return last;
+    const withSave = list.filter((w) => Engine.hasSaveForWorld(w.id));
+    return (withSave.length > 0 ? withSave[withSave.length - 1] : list[list.length - 1]).id;
+  }
+
+  /**
+   * World where Chapter II is unlocked (the Slime King already fell).
+   * Returns null while every world is still in Chapter I.
+   */
+  static getChapter2WorldId(): number | null {
+    const unlocked: { id: number; inProgress: boolean }[] = [];
+    for (const w of Engine.getWorldList()) {
+      try {
+        const raw = localStorage.getItem(SAVE_KEY_PREFIX + w.id);
+        if (!raw) continue;
+        const d = JSON.parse(raw);
+        if (!(d?.kingDefeated || d?.victory || d?.c2?.active)) continue;
+        unlocked.push({ id: w.id, inProgress: !!d.c2?.active && !d.c2?.ending });
+      } catch {
+        /* corrupt save — skip */
+      }
+    }
+    if (unlocked.length === 0) return null;
+    const last = Engine.getLastWorldId();
+    const recent = unlocked.find((u) => u.id === last);
+    if (recent) return recent.id;
+    const ongoing = unlocked.find((u) => u.inProgress);
+    return (ongoing ?? unlocked[0]).id;
+  }
+
   static deleteWorld(id: number) {
     let list = Engine.getWorldList();
     list = list.filter((w) => w.id !== id);
@@ -469,11 +567,14 @@ export class Engine {
   /** Start with a specific world (loads or creates). */
   startWithWorld(worldId: number) {
     this.currentWorldId = worldId;
+    Engine.setLastWorldId(worldId);
     const loaded = this.loadGame();
     if (loaded) {
       this.applySave(loaded);
-      if (this.currentWorldId > 0) {
-        this.world = generateWorld(this.currentWorldId);
+      // Only rebuild the terrain when the save comes from another world id;
+      // otherwise the saved blocks (and player position) must be kept.
+      if (loaded.currentWorldId !== undefined && loaded.currentWorldId !== worldId) {
+        this.world = generateWorld(worldId);
         const sx = this.world.spawnX;
         const surf = this.world.surfaceY[sx];
         for (let dx = -2; dx <= 2; dx++) {
@@ -485,6 +586,7 @@ export class Engine {
         this.px = this.world.spawnX * TILE;
         this.py = this.world.spawnY * TILE;
       }
+      this.currentWorldId = worldId;
     } else {
       this.world = generateWorld(worldId);
       this.resetProgress();
@@ -505,7 +607,6 @@ export class Engine {
     this.attach();
     this.resize();
     this.buildGlowSprite();
-    initSprites();
     const im = new Image();
     im.onload = () => {
       const cv = document.createElement("canvas");
@@ -519,6 +620,11 @@ export class Engine {
     this.running = true;
     this.last = performance.now();
     this.showBanner(loaded ? "Welcome back" : QUESTS[0].title, loaded ? `Day ${this.dayCount} · auto-saved` : "Welcome, survivor");
+    this.ensureC2Objects();
+    if (this.c2Active && !this.c2Seen) {
+      this.triggerStory("c2_intro");
+      this.saveGame();
+    }
     this.raf = requestAnimationFrame((t) => this.loop(t));
   }
 
@@ -554,6 +660,14 @@ export class Engine {
     this.fallDistance = 0;
     this.shakeX = 0;
     this.shakeY = 0;
+    this.c2Active = false;
+    this.c2Seen = false;
+    this.c2Ending = null;
+    this.heirFed = 0;
+    this.shardsFound = 0;
+    this.storyId = null;
+    this.shardPos = null;
+    this.gatePos = null;
   }
 
   private saveGame() {
@@ -586,6 +700,15 @@ export class Engine {
         copperMined: this.copperMined,
         ironMined: this.ironMined,
         currentWorldId: this.currentWorldId,
+        c2: {
+          active: this.c2Active,
+          seen: this.c2Seen,
+          ending: this.c2Ending,
+          heirFed: this.heirFed,
+          shards: this.shardsFound,
+          shard: this.shardPos,
+          gate: this.gatePos,
+        },
       };
       localStorage.setItem(this.saveKey(), JSON.stringify(data));
       console.log("Saving world", this.currentWorldId, "questIndex:", this.questIndex, "victory:", this.victory);
@@ -631,8 +754,43 @@ export class Engine {
     this.ironMined = d.ironMined ?? 0;
     this.currentWorldId = d.currentWorldId ?? 0;
     this.gameover = false;
-    this.victory = d.victory ?? false;
-    console.log("Loaded world", this.currentWorldId, "questIndex:", this.questIndex, "victory:", this.victory);
+    const c2 = d.c2 ?? null;
+    this.c2Active = !!c2?.active;
+    this.c2Seen = !!c2?.seen;
+    this.c2Ending = c2?.ending ?? null;
+    this.heirFed = c2?.heirFed ?? 0;
+    this.shardsFound = c2?.shards ?? 0;
+    this.shardPos = c2?.shard ?? null;
+    this.gatePos = c2?.gate ?? null;
+    this.storyId = null;
+    // Legacy chapter-I victory saves roll straight into Chapter II.
+    if ((d.victory ?? false) && !this.c2Active && !this.c2Ending) {
+      this.c2Active = true;
+      this.c2Seen = false;
+      this.kingDefeated = true;
+      this.questIndex = Math.max(this.questIndex, 11);
+    }
+    // Older builds stored questIndex = QUESTS.length on Chapter I victory.
+    // Now that the Chapter II quests live in the same list, such a value
+    // points past them and the HUD would claim everything is complete.
+    if (this.c2Active && !this.c2Ending) {
+      const expected = 11 + (this.heirFed >= 5 ? 1 : 0) + Math.min(this.shardsFound, 3);
+      if (this.questIndex < 11 || this.questIndex >= QUESTS.length) {
+        this.questIndex = expected;
+        // A gate spawned from the derailed index would be a second, dead gate.
+        if (this.gatePos && expected < 15) {
+          this.clearGateAt(this.gatePos);
+          this.gatePos = null;
+        }
+      }
+    }
+    // Endings are shown live; loading an ended world keeps it playable.
+    this.victory = false;
+    if (this.shardPos && getTile(this.world, this.shardPos.x, this.shardPos.y) !== SHARD) this.shardPos = null;
+    if (this.gatePos && getTile(this.world, this.gatePos.x, this.gatePos.y) !== HOLLOW_GATE) this.gatePos = null;
+    this.heirX = this.px + 34;
+    this.heirY = this.py;
+    console.log("Loaded world", this.currentWorldId, "questIndex:", this.questIndex, "chapter2:", this.c2Active);
     this.fallDistance = 0;
     this.shakeX = 0;
     this.shakeY = 0;
@@ -734,6 +892,216 @@ export class Engine {
     }
     this.removeItem("crown", 1);
     this.spawnKing();
+  }
+
+  // ---------- Chapter II — The Debt of Light ----------
+  /** Feed one gel to the last slime heir. Raises trust for the secret ending. */
+  feedHeir(): boolean {
+    if (!this.c2Active || this.c2Ending || this.storyId) return false;
+    if (this.heirFed >= SECRET_TRUST) return false;
+    if (this.count("gel") <= 0) return false;
+    this.removeItem("gel", 1);
+    this.heirFed++;
+    audio.playSfx("pickup");
+    this.float(this.heirX, this.heirY - 26, `♥ ${this.heirFed}`, this.heirFed >= SECRET_TRUST ? "#ffe08a" : "#9fe08a");
+    for (let i = 0; i < 5; i++) this.dust(this.heirX, this.heirY, "#9fe08a");
+    if (this.heirFed === SECRET_TRUST) {
+      this.showBanner("THE HEIR IS FULL", "It is heavy enough to wear a crown");
+    }
+    this.checkQuest();
+    this.pushState();
+    this.saveGame();
+    return true;
+  }
+
+  /** Close the current story card and continue the chapter chain. */
+  dismissStory() {
+    if (!this.storyId) return;
+    const id = this.storyId;
+    this.storyId = null;
+    if (id === "c2_intro") this.c2Seen = true;
+    if (id === "c2_act2") this.spawnShard(1);
+    else if (id === "c2_shard1") this.spawnShard(2);
+    else if (id === "c2_shard2") this.spawnShard(3);
+    else if (id === "c2_shard3") this.spawnGate();
+    this.checkQuest();
+    this.saveGame();
+    this.pushState();
+  }
+
+  /** Final choice at the Hollow Gate. */
+  chooseEnding(id: string) {
+    if (!this.c2Active || this.c2Ending) return;
+    if (id !== "crown" && id !== "debt" && id !== "dawn") return;
+    if (id === "dawn" && this.heirFed < SECRET_TRUST) return;
+    this.storyId = null;
+    this.c2Ending = id;
+    this.questIndex = QUESTS.length;
+    this.victory = true;
+    this.gameover = false;
+    audio.playSfx("victory");
+    audio.setTrack(id === "dawn" ? "day" : "menu");
+    this.showBanner("THE DEBT OF LIGHT", "Your choice is written");
+    this.saveGame();
+    this.pushState();
+    this.cb.onVictory();
+  }
+
+  private triggerStory(id: string) {
+    if (this.storyId === id) return;
+    this.storyId = id;
+    this.keys = {};
+    this.mouseDown = false;
+    this.rightDown = false;
+    this.cb.onStory?.(id);
+    this.pushState();
+  }
+
+  private ensureC2Objects() {
+    if (!this.c2Active || this.c2Ending) return;
+    if (this.questIndex >= 12 && this.questIndex <= 14 && !this.shardPos && this.shardsFound < 3) {
+      this.spawnShard(Math.min(3, this.shardsFound + 1));
+    }
+    if (this.questIndex >= 15 && !this.gatePos) {
+      this.spawnGate();
+    }
+  }
+
+  private spawnShard(idx: number) {
+    const dir = idx === 2 ? 1 : -1;
+    const dist = 26 + idx * 6;
+    let sx = Math.floor(this.px / TILE) + dir * dist;
+    sx = Math.max(8, Math.min(this.world.w - 9, sx));
+    const surf = this.world.surfaceY[sx];
+    for (let dy = 1; dy <= 7; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const t = getTile(this.world, sx + dx, surf - dy);
+        if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
+      }
+    }
+    const sy = surf - 3;
+    setTile(this.world, sx, sy, SHARD);
+    this.shardPos = { x: sx, y: sy, idx };
+    this.showBanner("A MEMORY SHARD", "It hums with borrowed light");
+    this.pushState();
+  }
+
+  private spawnGate() {
+    let gx = Math.floor(this.px / TILE) + 30;
+    gx = Math.max(14, Math.min(this.world.w - 15, gx));
+    const surf = this.world.surfaceY[gx];
+    for (let dy = 1; dy <= 10; dy++) {
+      for (let dx = -5; dx <= 6; dx++) {
+        const t = getTile(this.world, gx + dx, surf - dy);
+        if (t === WOOD || t === LEAVES || t === SHARD) setTile(this.world, gx + dx, surf - dy, AIR);
+      }
+    }
+    for (let dy = 1; dy <= 6; dy++) {
+      setTile(this.world, gx - 4, surf - dy, BEDROCK);
+      setTile(this.world, gx + 5, surf - dy, BEDROCK);
+    }
+    for (let dx = -4; dx <= 5; dx++) setTile(this.world, gx + dx, surf - 7, BEDROCK);
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 1; dy <= 6; dy++) setTile(this.world, gx + dx, surf - dy, HOLLOW_GATE);
+    }
+    this.gatePos = { x: gx + 1, y: surf - 3 };
+    this.showBanner("THE HOLLOW GATE", "It has risen where the King fell");
+    this.pushState();
+  }
+
+  /** Remove a Hollow Gate that was spawned before its quest was reached. */
+  private clearGateAt(pos: { x: number; y: number }) {
+    const gx = pos.x - 1;
+    const surf = pos.y + 3;
+    for (let dx = -5; dx <= 6; dx++) {
+      for (let dy = 1; dy <= 8; dy++) {
+        const tx = gx + dx;
+        const ty = surf - dy;
+        const t = getTile(this.world, tx, ty);
+        if (t === HOLLOW_GATE || t === BEDROCK) setTile(this.world, tx, ty, AIR);
+      }
+    }
+  }
+
+  private updateStoryTriggers() {
+    if (this.storyId || this.gameover || this.victory || !this.c2Active || this.c2Ending) return;
+    if (this.shardPos) {
+      const cx = this.shardPos.x * TILE + TILE / 2;
+      const cy = this.shardPos.y * TILE + TILE / 2;
+      if (Math.hypot(cx - this.px, cy - this.py) < TILE * 3.6) {
+        const idx = this.shardPos.idx;
+        setTile(this.world, this.shardPos.x, this.shardPos.y, AIR);
+        this.shardPos = null;
+        this.shardsFound = Math.max(this.shardsFound, idx);
+        audio.playSfx("levelup");
+        for (let i = 0; i < 14; i++) this.dust(cx, cy, "#8ff0ff");
+        this.particles.push({ x: cx, y: cy, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 90, color: "rgba(143,240,255,0.9)", grav: 0, ring: true });
+        this.triggerStory(`c2_shard${idx}`);
+        return;
+      }
+    }
+    if (this.questIndex >= 15 && this.gatePos) {
+      const cx = this.gatePos.x * TILE + TILE / 2;
+      const cy = this.gatePos.y * TILE;
+      if (Math.hypot(cx - this.px, cy - this.py) < TILE * 3.2) {
+        this.triggerStory("c2_final");
+      }
+    }
+  }
+
+  private updateHeir(dt: number) {
+    if (!this.c2Active) return;
+    const targetX = this.px - this.pface * 36;
+    const targetY = this.py + 12;
+    const dx = targetX - this.heirX;
+    this.heirX += dx * Math.min(1, dt * 2.2);
+    this.heirY += (targetY - this.heirY) * Math.min(1, dt * 4);
+    this.heirHop += dt * (Math.abs(dx) > 6 ? 7 : 2);
+    if (Math.abs(dx) > 14 && Math.random() < dt * 3) {
+      this.dust(this.heirX, this.heirY + 10, "rgba(150,220,140,0.5)");
+    }
+  }
+
+  private drawHeir(ctx: CanvasRenderingContext2D) {
+    if (!this.c2Active) return;
+    const x = this.heirX;
+    const hop = Math.abs(Math.sin(this.heirHop)) * 3;
+    const y = this.heirY - hop;
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(x, this.py + 24, 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const g = ctx.createRadialGradient(x - 3, y - 4, 2, x, y, 16);
+    g.addColorStop(0, "#c9ffb0");
+    g.addColorStop(0.55, "#7fe06a");
+    g.addColorStop(1, "#3f9c3a");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 13, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.beginPath();
+    ctx.ellipse(x - 4, y - 4, 3, 2, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    const blink = Math.sin(this.frame * 0.05) > 0.97 ? 0.2 : 1;
+    ctx.fillStyle = "#1c2a16";
+    ctx.fillRect(x - 5, y - 2, 2, 3 * blink);
+    ctx.fillRect(x + 3, y - 2, 2, 3 * blink);
+    if (this.heirFed >= SECRET_TRUST) {
+      ctx.fillStyle = "#ffe08a";
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y - 12);
+      ctx.lineTo(x - 3, y - 18);
+      ctx.lineTo(x, y - 13);
+      ctx.lineTo(x + 3, y - 18);
+      ctx.lineTo(x + 6, y - 12);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   private bossActive(): boolean {
@@ -902,6 +1270,8 @@ export class Engine {
   }
 
   private update(dt: number) {
+    // A story card is on screen — freeze the sim (rendering continues).
+    if (this.storyId) return;
     // day cycle
     this.dayFrac = (this.dayFrac + dt / DAY_LEN) % 1;
     const night = this.isNightNow();
@@ -913,6 +1283,7 @@ export class Engine {
     this.swingT = Math.max(0, this.swingT - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     this.hurtT = Math.max(0, this.hurtT - dt);
+    this.portalMsgCd = Math.max(0, this.portalMsgCd - dt);
     this.bannerT = Math.max(0, this.bannerT - dt);
     if (this.bannerT <= 0) this.banner = null;
 
@@ -940,6 +1311,8 @@ export class Engine {
     this.updateEnemies(dt);
     this.updateParticles(dt);
     this.updateAmbient(dt, night);
+    this.updateHeir(dt);
+    this.updateStoryTriggers();
 
     // spawns
     this.spawnT -= dt;
@@ -973,7 +1346,15 @@ export class Engine {
     if (move !== 0) {
       this.pface = move > 0 ? 1 : -1;
       this.pvx = move * MOVE_SPEED;
-      if (this.onGround) this.walkT += dt * 14;
+      if (this.onGround) {
+        this.walkT += dt * 14;
+        // running dust puffs
+        this.stepDustT -= dt;
+        if (this.stepDustT <= 0) {
+          this.stepDustT = 0.24;
+          for (let i = 0; i < 2; i++) this.dust(this.px - this.pface * 6, this.py + 20, "rgba(190,170,140,0.8)");
+        }
+      }
     } else {
       this.pvx *= Math.pow(0.001, dt);
       if (Math.abs(this.pvx) < 4) this.pvx = 0;
@@ -998,6 +1379,7 @@ export class Engine {
         this.onGround = false;
         this.jumpBuffer = 0;
         audio.playSfx("jump");
+        for (let i = 0; i < 4; i++) this.dust(this.px, this.py + 20, "rgba(190,170,140,0.8)");
       }
       this.pvy += GRAVITY * dt;
       if (this.pvy > 900) this.pvy = 900;
@@ -1012,6 +1394,9 @@ export class Engine {
       this.onGround = this.integrateY(dt, 18, 44);
       if (!wasGround && this.onGround) {
         audio.playSfx("land");
+        for (let i = 0; i < Math.min(8, 2 + Math.floor(this.fallDistance / 120)); i++) {
+          this.dust(this.px, this.py + 20, "rgba(190,170,140,0.8)");
+        }
         // fall damage
         if (this.fallDistance > 600 && !this.godMode) {
           const rawDmg = Math.floor((this.fallDistance - 600) / 30);
@@ -1041,6 +1426,14 @@ export class Engine {
     const feetTX = Math.floor(this.px / TILE);
     const feetTY = Math.floor((this.py + 22) / TILE);
     if (getTile(this.world, feetTX, feetTY) === PORTAL) {
+      if (this.c2Active && !this.c2Ending) {
+        // The portals sleep while the Ledger is unfinished.
+        if (this.portalMsgCd <= 0) {
+          this.portalMsgCd = 5;
+          this.showBanner("THE PORTALS SLEEP", "The Ledger must be finished here");
+        }
+        return;
+      }
       this.currentWorldId++;
       this.world = generateWorld(this.currentWorldId);
       // find a portal in the new world to spawn at
@@ -1277,20 +1670,31 @@ export class Engine {
     if (idx < 0) return;
     this.enemies.splice(idx, 1);
     audio.playSfx("enemyDie");
-    for (let i = 0; i < 8; i++) this.dust(e.x, e.y, e.type === "zombie" ? "#6fae5a" : e.type === "bat" ? "#9a7bff" : "#5fd06f");
+    const burstColor = e.type === "zombie" ? "#6fae5a" : e.type === "bat" ? "#9a7bff" : "#5fd06f";
+    for (let i = 0; i < 8; i++) this.dust(e.x, e.y, burstColor);
+    // shockwave ring
+    this.particles.push({ x: e.x, y: e.y, vx: 0, vy: 0, life: 0.35, max: 0.35, size: e.w * 1.6 + 14, color: "rgba(255,255,255,0.9)", grav: 0, ring: true });
     if (e.type === "king") {
       this.kingDefeated = true;
       this.addItem("gold_bar", 15);
       this.addItem("diamond", 10);
       this.addItem("gel", 30);
-      this.showBanner("THE KING FALLS", "Dawn breaks eternal over your realm");
-      // Instant victory: automatically advance all quests to completed
-      // so speedrunning via the Cheat Menu correctly triggers the ending sequence.
-      this.questIndex = QUESTS.length;
-      this.victory = true;
       audio.playSfx("victory");
-      audio.setTrack("day");
-      this.cb.onVictory();
+      if (!this.c2Active || this.c2Ending) {
+        this.showBanner("THE KING FALLS", "Dawn breaks — and something below begins to count");
+        this.c2Active = true;
+        this.c2Ending = null;
+        this.heirFed = 0;
+        this.shardsFound = 0;
+        this.shardPos = null;
+        this.gatePos = null;
+        this.questIndex = 11;
+        this.heirX = this.px + 34;
+        this.heirY = this.py;
+        this.triggerStory("c2_intro");
+      } else {
+        this.showBanner("THE KING FALLS AGAIN", "The debt does not care how many times you win");
+      }
       this.pushState();
       this.saveGame();
       return;
@@ -1501,7 +1905,7 @@ export class Engine {
 
   // ---------- quests ----------
   private checkQuest() {
-    if (this.victory || this.gameover) return;
+    if (this.victory || this.gameover || this.storyId) return;
     const q = QUESTS[this.questIndex];
     if (!q) return;
     let done = false;
@@ -1517,6 +1921,12 @@ export class Engine {
       case 8: done = this.count("iron_sword") >= 1; break;
       case 9: done = this.count("crown") >= 1; break;
       case 10: done = this.kingDefeated; break;
+      // Chapter II
+      case 11: done = this.heirFed >= 5; break;
+      case 12: done = this.shardsFound >= 1; break;
+      case 13: done = this.shardsFound >= 2; break;
+      case 14: done = this.shardsFound >= 3; break;
+      // case 15 (The Vigil) is completed by approaching the Hollow Gate.
     }
     if (!done) return;
     // reward
@@ -1527,17 +1937,23 @@ export class Engine {
       case 5: this.addItem("wood_sword", 1); break;
       case 6: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
       case 8: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case 11: this.maxHp += 20; this.hp = Math.min(this.maxHp, this.hp + 20); break;
+      case 12: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case 13: this.maxHp += 10; this.hp = Math.min(this.maxHp, this.hp + 10); break;
+      case 14: this.addItem("gel", 10); break;
     }
     audio.playSfx("levelup");
     this.showBanner("QUEST COMPLETE", q.title);
     this.float(this.px, this.py - 40, q.reward, "#9fff9f");
     this.questIndex++;
-    if (this.questIndex >= QUESTS.length) {
-      this.victory = true;
-      audio.playSfx("victory");
-      audio.setTrack("day");
-      this.cb.onVictory();
+    if (this.questIndex === 12) {
+      // Feeding the heir opens Act II.
+      this.triggerStory("c2_act2");
+    } else if (this.questIndex === 15) {
+      this.showBanner("THE VIGIL", "The Hollow Gate has risen to the east");
     }
+    this.saveGame();
+    this.pushState();
   }
 
   private showBanner(title: string, sub: string) {
@@ -1559,6 +1975,7 @@ export class Engine {
     for (const p of this.particles) {
       p.life -= dt;
       p.vy += p.grav * dt;
+      if (p.sway) p.vx = Math.sin((p.max - p.life) * 4 + p.sway) * 18;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
     }
@@ -1586,6 +2003,26 @@ export class Engine {
           } else {
             this.particles.push({ x, y, vx: (Math.random() - 0.5) * 10, vy: -8, life: 3, max: 3, size: 1.6, color: "rgba(255,255,255,0.7)", grav: 0 });
           }
+        }
+      }
+      // sample a few visible tiles: falling leaves from trees, sparks from torches
+      for (let s = 0; s < 3; s++) {
+        const tx = Math.floor((this.camX + Math.random() * this.viewW) / TILE);
+        const ty = Math.floor((this.camY + Math.random() * this.viewH) / TILE);
+        if (tx < 0 || tx >= this.world.w || ty < 0 || ty >= this.world.h) continue;
+        const id = getTile(this.world, tx, ty);
+        if (id === LEAVES && Math.random() < 0.3 && this.particles.length < 280) {
+          this.particles.push({
+            x: tx * TILE + Math.random() * TILE, y: ty * TILE + TILE,
+            vx: 0, vy: 14, life: 2.2 + Math.random(), max: 3, size: 3,
+            color: Math.random() < 0.5 ? "#4aa036" : "#357a27", grav: 26, sway: tx * 1.7,
+          });
+        } else if (id === TORCH && Math.random() < 0.25 && this.particles.length < 280) {
+          this.particles.push({
+            x: tx * TILE + TILE / 2 + (Math.random() - 0.5) * 4, y: ty * TILE + TILE - 18,
+            vx: (Math.random() - 0.5) * 12, vy: -30 - Math.random() * 20, life: 0.7, max: 0.7,
+            size: 2, color: Math.random() < 0.5 ? "#ffcf6b" : "#ff9d3c", grav: -20,
+          });
         }
       }
     }
@@ -1635,6 +2072,11 @@ export class Engine {
       savedAt: this.saveCounter,
       playerTX: pxTile,
       playerTY: pyTile,
+      c2Active: this.c2Active,
+      heirFed: this.heirFed,
+      shardsFound: this.shardsFound,
+      ending: this.c2Ending,
+      story: this.storyId,
     });
   }
 
@@ -1697,12 +2139,34 @@ export class Engine {
 
     // particles
     for (const p of this.particles) {
-      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      const a = Math.max(0, p.life / p.max);
+      if (p.ring) {
+        // expanding shockwave ring (on enemy death)
+        const r = p.size * (1 - p.life / p.max);
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 2 + a * 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        continue;
+      }
+      ctx.globalAlpha = a;
       ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      const rot = p.sway ? (p.max - p.life) * 5 : 0;
+      if (rot) {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(rot);
+        ctx.fillRect(-p.size, -p.size / 2, p.size * 2, p.size);
+        ctx.restore();
+      } else {
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
     }
     ctx.globalAlpha = 1;
     for (const e of this.enemies) this.drawEnemy(ctx, e);
+    this.drawHeir(ctx);
     if (!this.gameover) this.drawPlayer(ctx);
 
     // floating text (smooth)
@@ -1813,7 +2277,28 @@ export class Engine {
           const r = TILE * 2.0 * fl;
           ctx.globalAlpha = 0.3 * fl;
           ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
+        } else if (id === SHARD) {
+          const fl = 0.75 + 0.25 * Math.sin(this.frame * 0.07 + tx);
+          const r = TILE * 2.4 * fl;
+          ctx.globalAlpha = 0.34 * fl;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
+        } else if (id === HOLLOW_GATE) {
+          const fl = 0.7 + 0.3 * Math.sin(this.frame * 0.04 + ty * 0.9);
+          const r = TILE * 1.7 * fl;
+          ctx.globalAlpha = 0.2 * fl;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
         }
+      }
+    }
+    // gate beacon — a violet pillar rising from the monument
+    if (this.gatePos && this.c2Active && !this.c2Ending) {
+      const gx = this.gatePos.x * TILE + TILE / 2;
+      const gy = this.gatePos.y * TILE;
+      for (let i = 0; i < 4; i++) {
+        const r = TILE * (1.7 + i * 1.0);
+        const a = 0.085 * (1 - i / 4) * (0.8 + 0.2 * Math.sin(this.frame * 0.05 + i));
+        ctx.globalAlpha = a;
+        ctx.drawImage(spr, 0, 0, spr.width, spr.height, gx - r, gy - TILE * 5 - i * TILE * 1.2 - r, r * 2, r * 2);
       }
     }
     ctx.globalAlpha = 1;
@@ -1859,6 +2344,18 @@ export class Engine {
       ctx.fillRect(0, this.viewH * 0.5, this.viewW, this.viewH * 0.22);
       ctx.restore();
       void iw;
+    }
+
+    // dawn/dusk horizon glow — warm band while the sun kisses the horizon
+    const dusk = 1 - Math.min(1, Math.abs(bright) / 0.28);
+    if (dusk > 0) {
+      const hy = this.viewH * 0.42;
+      const hg = ctx.createLinearGradient(0, hy - 70, 0, hy + 90);
+      hg.addColorStop(0, "rgba(255,150,70,0)");
+      hg.addColorStop(0.5, `rgba(255,145,65,${0.22 * dusk})`);
+      hg.addColorStop(1, "rgba(255,90,40,0)");
+      ctx.fillStyle = hg;
+      ctx.fillRect(0, hy - 70, this.viewW, 160);
     }
 
     // sun / moon
@@ -1920,6 +2417,19 @@ export class Engine {
         const cyc = 40 + ((i * 53) % 90);
         cloud(cxc, cyc, 2 + (i % 2));
       }
+      // birds drifting far away
+      ctx.strokeStyle = "rgba(40,60,80,0.55)";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const bx = ((this.frame * (1.4 + i * 0.5) + i * 420) % (this.viewW + 80)) - 40;
+        const by = 52 + Math.sin(this.frame * 0.01 + i * 2.4) * 14 + i * 26;
+        const fl = Math.sin(this.frame * 0.25 + i * 1.3) * 3;
+        ctx.beginPath();
+        ctx.moveTo(bx - 6, by - fl);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(bx + 6, by - fl);
+        ctx.stroke();
+      }
       ctx.globalAlpha = 1;
     } else {
       // stars
@@ -1940,6 +2450,35 @@ export class Engine {
       ctx.beginPath();
       ctx.arc(cx, cy, 18, 0, Math.PI * 2);
       ctx.fill();
+      // moon craters
+      ctx.fillStyle = "rgba(160,170,210,0.5)";
+      ctx.beginPath();
+      ctx.arc(cx - 5, cy - 4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 6, cy + 5, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 2, cy - 8, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // shooting star (once per cycle)
+      const meteorCycle = 780;
+      const mf = this.frame % meteorCycle;
+      if (mf < 30) {
+        const mi = Math.floor(this.frame / meteorCycle);
+        const mx0 = ((mi * 977) % Math.floor(this.viewW * 0.7)) + this.viewW * 0.1;
+        const my0 = ((mi * 613) % Math.floor(this.viewH * 0.25)) + 20;
+        const p = mf / 30;
+        const mx = mx0 + p * 130;
+        const my = my0 + p * 60;
+        const a = Math.sin(p * Math.PI);
+        ctx.strokeStyle = `rgba(220,235,255,${0.8 * a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(mx - 40, my - 18);
+        ctx.lineTo(mx, my);
+        ctx.stroke();
+      }
     }
     ctx.restore();
 
@@ -2042,10 +2581,98 @@ export class Engine {
       ctx.fill();
       return;
     }
+    if (id === SHARD) {
+      // floating memory shard — bobbing crystal with an orbiting halo
+      const t = this.frame * 0.05;
+      const cx = x + TILE / 2;
+      const cy = y + TILE / 2 + Math.sin(t + tx * 0.8) * 3;
+      const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 26);
+      halo.addColorStop(0, "rgba(150,240,255,0.55)");
+      halo.addColorStop(0.5, "rgba(90,200,255,0.22)");
+      halo.addColorStop(1, "rgba(60,160,220,0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(cx - 26, cy - 26, 52, 52);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.sin(t * 0.7) * 0.18);
+      const grd = ctx.createLinearGradient(0, -14, 0, 14);
+      grd.addColorStop(0, "#e8ffff");
+      grd.addColorStop(0.45, "#8ff0ff");
+      grd.addColorStop(1, "#2b8fb5");
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(7, -2);
+      ctx.lineTo(4, 12);
+      ctx.lineTo(-4, 12);
+      ctx.lineTo(-7, -2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "rgba(220,255,255,0.8)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.beginPath();
+      ctx.moveTo(0, -12);
+      ctx.lineTo(3, -2);
+      ctx.lineTo(0, 9);
+      ctx.lineTo(-2, -2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      for (let i = 0; i < 3; i++) {
+        const a = t * 1.6 + (i * Math.PI * 2) / 3;
+        ctx.fillStyle = "rgba(200,250,255,0.85)";
+        ctx.fillRect(cx + Math.cos(a) * 17 - 1.5, cy + Math.sin(a) * 7 - 1.5, 3, 3);
+      }
+      return;
+    }
+    if (id === HOLLOW_GATE) {
+      // the doorway into the Hollow Silence — a void with drifting violet motes
+      const vg = ctx.createLinearGradient(x, y, x, y + TILE);
+      vg.addColorStop(0, "#150e22");
+      vg.addColorStop(1, "#05040a");
+      ctx.fillStyle = vg;
+      ctx.fillRect(x, y, TILE, TILE);
+      const fl = 0.55 + 0.45 * Math.sin(this.frame * 0.06 + ty * 1.3);
+      for (let i = 0; i < 3; i++) {
+        const seed = (tx * 31 + ty * 17 + i * 91) % 997;
+        const mx = x + 4 + ((seed * 7) % (TILE - 8));
+        const my = y + TILE - ((this.frame * 0.35 + seed) % (TILE + 10));
+        const a = Math.max(0, 1 - Math.abs(my - (y + TILE / 2)) / (TILE * 0.8));
+        ctx.fillStyle = `rgba(190,150,255,${(0.12 + 0.45 * a) * fl})`;
+        ctx.fillRect(mx, my, 2, 2);
+      }
+      if (ty % 2 === 0) {
+        const rx = x + TILE / 2;
+        const ry = y + TILE / 2;
+        ctx.strokeStyle = `rgba(185,125,255,${0.22 + 0.2 * fl})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rx - 6, ry - 5);
+        ctx.lineTo(rx + 5, ry - 5);
+        ctx.moveTo(rx - 5, ry + 1);
+        ctx.lineTo(rx + 5, ry + 1);
+        ctx.moveTo(rx, ry - 5);
+        ctx.lineTo(rx, ry + 6);
+        ctx.stroke();
+      }
+      // violet rim on the outer edges of the monument
+      ctx.strokeStyle = "rgba(150,95,230,0.55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (getTile(this.world, tx - 1, ty) !== HOLLOW_GATE) { ctx.moveTo(x + 1, y); ctx.lineTo(x + 1, y + TILE); }
+      if (getTile(this.world, tx + 1, ty) !== HOLLOW_GATE) { ctx.moveTo(x + TILE - 1, y); ctx.lineTo(x + TILE - 1, y + TILE); }
+      if (getTile(this.world, tx, ty - 1) !== HOLLOW_GATE) { ctx.moveTo(x, y + 1); ctx.lineTo(x + TILE, y + 1); }
+      ctx.stroke();
+      return;
+    }
     // blit cached pixel-art texture (4 variants for variety). The textures
     // already bake in edge shading, so no per-tile overlays are needed here.
     const v = (tx * 7 ^ ty * 13) & 3;
-    ctx.drawImage(tileTexture(id, v), 0, 0, TEX, TEX, x, y, TILE, TILE);
+    // leaves sway gently in the wind
+    const ox = id === LEAVES ? Math.sin(this.frame * 0.045 + (tx + ty * 3) * 0.7) * 1.6 : 0;
+    ctx.drawImage(tileTexture(id, v), 0, 0, TEX, TEX, x + ox, y, TILE, TILE);
     // single cheap highlight on the top edge of surface-exposed blocks.
     if (!isSolid(getTile(this.world, tx, ty - 1))) {
       ctx.fillStyle = "rgba(255,255,255,0.12)";
@@ -2103,79 +2730,139 @@ export class Engine {
     ctx.fill();
     ctx.restore();
 
-    const moving = this.onGround && this.pvx !== 0;
+    const moving = this.onGround && Math.abs(this.pvx) > 4;
+    const airborne = !this.onGround && !this.flying;
     const bob = moving ? Math.abs(Math.sin(this.walkT)) * -2 : this.onGround ? Math.sin(this.frame * 0.06) * 0.6 : 0;
-    const footY = y + 22 + bob;
-    const spr = getSprite("player");
 
     ctx.save();
     ctx.globalAlpha = blink ? 0.4 : 1;
-    if (spr) {
-      this.blitFeet(ctx, spr, x, footY, 56, this.pface, 1);
-    } else {
-      this.drawPlayerFallback(ctx, x, y + bob, moving, this.pface);
-    }
+    this.drawWarden(ctx, x, y + bob, moving, airborne, this.pface, this.walkT);
     ctx.restore();
 
     // tool / weapon in hand (drawn over the body)
     this.drawTool(ctx, x, y + bob);
+
+    // swing slash arc
+    if (this.swingT > 0) {
+      const p = 1 - this.swingT / 0.18;
+      const reach = TILE * 1.6;
+      ctx.save();
+      ctx.translate(x, y - 6);
+      ctx.scale(this.pface, 1);
+      ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - p)})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(8, 0, reach, -1.2 + p * 2.2, 0.2 + p * 2.2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,220,150,${0.35 * (1 - p)})`;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
-  private drawPlayerFallback(ctx: CanvasRenderingContext2D, x: number, y: number, moving: boolean, face: number) {
+  /** Fully procedural animated Warden: walk cycle with swinging legs & arms,
+      tunic with gold trim, spiky hair — mirrors the marketing art style. */
+  private drawWarden(ctx: CanvasRenderingContext2D, x: number, y: number, moving: boolean, airborne: boolean, face: number, walkT: number) {
+    const OL = "#241208";
+    const legSwing = moving ? Math.sin(walkT) : 0;
+    const armSwing = moving ? Math.sin(walkT + Math.PI) * 0.5 : 0;
+    const breathe = moving ? 0 : Math.sin(this.frame * 0.06) * 0.5;
+
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(face, 1);
-    const legSwing = moving ? Math.sin(this.walkT) * 6 : 0;
-    const OL = "#241208";
+    if (moving) ctx.rotate(0.05); // slight forward lean while running
+
+    const leg = (phase: number, back: boolean) => {
+      let ang = legSwing * phase;
+      if (airborne) ang = phase > 0 ? 0.45 : -0.35; // tucked jump pose
+      ctx.save();
+      ctx.translate(phase > 0 ? 2.5 : -2.5, 9);
+      ctx.rotate(ang);
+      // upper leg (pants)
+      ctx.fillStyle = back ? "#4a3020" : "#5a3a22";
+      ctx.fillRect(-3.5, 0, 7, 9);
+      // boot
+      ctx.fillStyle = back ? "#2e1c10" : "#3a2614";
+      ctx.fillRect(-4, 8, 9, 5);
+      ctx.fillStyle = OL;
+      ctx.fillRect(-4, 12, 9, 1.5);
+      ctx.restore();
+    };
+    const arm = (phase: number, back: boolean) => {
+      let ang = armSwing * phase;
+      if (airborne) ang = phase > 0 ? -0.7 : 0.3;
+      ctx.save();
+      ctx.translate(phase > 0 ? 6.5 : -6.5, -7 + breathe);
+      ctx.rotate(ang);
+      // sleeve (tunic color, darker on the back arm)
+      ctx.fillStyle = back ? "#2f5f9c" : "#3a78c8";
+      ctx.fillRect(-2.5, 0, 5, 7);
+      // forearm with leather bracer
+      ctx.fillStyle = "#e8bc90";
+      ctx.fillRect(-2, 6.5, 4, 4);
+      ctx.fillStyle = "#7a4a22";
+      ctx.fillRect(-2.5, 9.5, 5, 2.5);
+      ctx.restore();
+    };
+
+    // back limbs → torso → head → front limbs (correct depth order)
+    leg(-1, true);
+    arm(-1, true);
+
+    // torso — blue tunic with gold trim
     ctx.fillStyle = OL;
-    ctx.fillRect(-8, 8, 8, 16 + legSwing);
-    ctx.fillRect(0, 8, 8, 16 - legSwing);
-    ctx.fillStyle = "#5a3a22";
-    ctx.fillRect(-7, 9, 6, 14 + legSwing);
-    ctx.fillRect(1, 9, 6, 14 - legSwing);
-    ctx.fillStyle = "#3a2614";
-    ctx.fillRect(-7, 19 + legSwing, 7, 4);
-    ctx.fillRect(1, 19 - legSwing, 7, 4);
-    ctx.fillStyle = OL;
-    ctx.fillRect(-10, -11, 20, 23);
-    const tg = ctx.createLinearGradient(0, -11, 0, 12);
+    ctx.fillRect(-10, -12, 20, 23);
+    const tg = ctx.createLinearGradient(0, -12, 0, 11);
     tg.addColorStop(0, "#5aa0e0");
     tg.addColorStop(0.5, "#3a78c8");
     tg.addColorStop(1, "#264f8a");
     ctx.fillStyle = tg;
-    ctx.fillRect(-9, -10, 18, 21);
-    ctx.fillStyle = "#7a4a22";
-    ctx.fillRect(-9, 3, 18, 4);
+    ctx.fillRect(-9, -11, 18, 21);
+    // gold trim: collar + belt
     ctx.fillStyle = "#e7c14a";
-    ctx.fillRect(-2, 3, 4, 4);
-    ctx.fillStyle = "rgba(255,245,200,0.5)";
-    ctx.beginPath();
-    ctx.arc(0, -3, 2.4, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillRect(-9, 2, 18, 4);
+    ctx.fillStyle = "#b8860b";
+    ctx.fillRect(-9, 5, 18, 1);
+    ctx.fillStyle = "#ffe79a";
+    ctx.fillRect(-2, 3, 4, 2);
+    // subtle chest highlight
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(-6, -10, 3, 12);
+
+    // head
+    const hy = -26 + breathe;
     ctx.fillStyle = OL;
-    ctx.fillRect(-8, -26, 16, 16);
-    const hg = ctx.createLinearGradient(0, -26, 0, -10);
+    ctx.fillRect(-8, hy, 16, 16);
+    const hg = ctx.createLinearGradient(0, hy, 0, hy + 16);
     hg.addColorStop(0, "#fbd9aa");
     hg.addColorStop(1, "#e0b07c");
     ctx.fillStyle = hg;
-    ctx.fillRect(-7, -25, 14, 14);
-    ctx.fillStyle = "#5a3a22";
-    ctx.fillRect(-7, -26, 14, 6);
+    ctx.fillRect(-7, hy + 1, 14, 14);
+    // hair — spiky, covers the top
+    ctx.fillStyle = "#6e4a26";
+    ctx.fillRect(-7, hy, 14, 5);
+    ctx.fillStyle = OL;
+    ctx.beginPath();
+    ctx.moveTo(-7, hy + 1);
+    ctx.lineTo(-4, hy - 4);
+    ctx.lineTo(-1, hy + 1);
+    ctx.lineTo(2, hy - 5);
+    ctx.lineTo(5, hy);
+    ctx.lineTo(7, hy - 3);
+    ctx.lineTo(8, hy + 3);
+    ctx.lineTo(-7, hy + 3);
+    ctx.closePath();
+    ctx.fillStyle = "#5a3a1e";
+    ctx.fill();
+    ctx.fillStyle = "#8a6236";
+    ctx.fillRect(-5, hy, 4, 2);
+    // eye (facing side)
     ctx.fillStyle = "#1a2230";
-    ctx.fillRect(3, -19, 3, 3);
-    ctx.restore();
-  }
-
-  /** Draw a sprite with its feet at footY, scaled to height h. */
-  private blitFeet(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, cx: number, footY: number, h: number, facing: number, sy: number) {
-    const sw = spr.width, sh = spr.height;
-    const scale = h / sh;
-    const dw = sw * scale;
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.translate(cx, footY);
-    ctx.scale(facing, sy);
-    ctx.drawImage(spr, 0, 0, sw, sh, -dw / 2, -h, dw, h);
+    ctx.fillRect(2, hy + 6, 3, 3);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(3, hy + 6.5, 1, 1);
     ctx.restore();
   }
   private drawTool(ctx: CanvasRenderingContext2D, x: number, y: number) {

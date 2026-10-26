@@ -1,12 +1,15 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Engine, type EngineState } from "./engine";
-import { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COPPER, IRON, GOLD, DIAMOND, COAL, PLANK, TORCH, GLASS, BEDROCK, WORKBENCH, FURNACE, PORTAL, WATER, ITEMS, RECIPES, type Station } from "./world";
+import { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COPPER, IRON, GOLD, DIAMOND, COAL, PLANK, TORCH, GLASS, BEDROCK, WORKBENCH, FURNACE, PORTAL, WATER, SHARD, HOLLOW_GATE, ITEMS, RECIPES, type Station } from "./world";
 import { audio } from "./audio";
 import bg from "./assets/sandbox-bg.jpg";
 import Landing from "./Landing";
 import MobileGate, { goFullscreen, isMobileDevice } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
 import EndingSequence from "./EndingSequence";
+import Chapter2Ending from "./Chapter2Ending";
+import StoryOverlay from "./StoryOverlay";
+import { SECRET_TRUST, type EndingId } from "./story";
 import LanguagePicker from "./LanguagePicker";
 import { useT, t, tItem, tItemDesc, tQuest, getLang, setLang, hasChosenLang, LANGS } from "./i18n";
 
@@ -109,6 +112,8 @@ function tileMinimapColor(id: number): string {
     case FURNACE: return "#5a5560";
     case PORTAL: return "#9933ff";
     case WATER: return "#3366cc";
+    case SHARD: return "#8ff0ff";
+    case HOLLOW_GATE: return "#7b4dbf";
     default: return "#000000";
   }
 }
@@ -294,6 +299,11 @@ function Hud({
           <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{tQuest(s.questIndex).title}</div>
           <div className="text-[11px] text-white/60 sm:text-xs leading-tight">{tQuest(s.questIndex).text}</div>
         </div>
+        {s.c2Active && !s.ending && (
+          <div className="pointer-events-none rounded-lg border border-emerald-300/25 bg-black/55 px-2 py-1 text-[10px] text-emerald-200/90 backdrop-blur-sm">
+            🟢 {t("c2_heir")} <span className={`font-bold ${s.heirFed >= SECRET_TRUST ? "text-amber-200" : "text-white/90"}`}>{s.heirFed}/{SECRET_TRUST}</span>
+          </div>
+        )}
       </div>
 
       {/* boss bar */}
@@ -481,6 +491,7 @@ function InventoryPanel({
   onCraft,
   onConsume,
   onSummon,
+  onFeed,
   onSwap,
   onSelectSlot,
 }: {
@@ -489,10 +500,12 @@ function InventoryPanel({
   onCraft: (id: string) => void;
   onConsume: (id: string) => void;
   onSummon: () => void;
+  onFeed: () => void;
   onSwap: (a: number, b: number) => void;
   onSelectSlot: (i: number) => void;
 }) {
   const sel = s.inventory[s.selected];
+  const gelCount = s.inventory.reduce((n, sl) => n + (sl?.id === "gel" ? sl.count : 0), 0);
   const [tapSel, setTapSel] = useState<number | null>(null); // tap-to-move (desktop + mobile)
   return (
     <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
@@ -584,6 +597,31 @@ function InventoryPanel({
                 <div className="text-xs text-white/40">Hotbar slot {s.selected + 1} is empty.</div>
               )}
             </div>
+            {s.c2Active && !s.ending && (
+              <div className="mt-3 rounded-lg border border-emerald-300/25 bg-emerald-400/5 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-emerald-100">🟢 {t("c2_heir")} · {s.heirFed}/{SECRET_TRUST}</div>
+                    <div className="text-[11px] text-white/50">{s.heirFed >= SECRET_TRUST ? t("c2_feed_max") : t("c2_feed")}</div>
+                  </div>
+                  <button
+                    disabled={gelCount <= 0 || s.heirFed >= SECRET_TRUST}
+                    onClick={onFeed}
+                    className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold ${
+                      gelCount > 0 && s.heirFed < SECRET_TRUST ? "bg-emerald-400 text-emerald-950 hover:bg-emerald-300" : "bg-white/5 text-white/30"
+                    }`}
+                  >
+                    🟢 +1 {gelCount > 0 ? `(${gelCount})` : ""}
+                  </button>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/50">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-lime-300 transition-[width] duration-200"
+                    style={{ width: `${Math.min(100, (s.heirFed / SECRET_TRUST) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* crafting */}
@@ -808,9 +846,9 @@ export default function App() {
 
   // sync engine UI/pause states
   useEffect(() => {
-    engineRef.current?.setUiOpen(invOpen || cheatOpen);
+    engineRef.current?.setUiOpen(invOpen || cheatOpen || !!state?.story);
     engineRef.current?.setPaused(pauseOpen);
-  }, [invOpen, pauseOpen, cheatOpen]);
+  }, [invOpen, pauseOpen, cheatOpen, state?.story]);
 
   const onState = useCallback((s: EngineState) => {
     if (prevHpRef.current > 0 && s.hp < prevHpRef.current) {
@@ -859,8 +897,11 @@ export default function App() {
     setEnded(null);
     setInvOpen(false);
     setPauseOpen(false);
+    const list = Engine.getWorldList();
+    const freeName = t("world_n").replace("{n}", String(list.length + 1));
+    const worldId = Engine.ensureFreeWorld(freeName);
     setStartMode("auto");
-    setPlayWorldId(null);
+    setPlayWorldId(worldId);
     setRunId((r) => r + 1);
     setScreen("playing");
   };
@@ -910,7 +951,7 @@ export default function App() {
   // keyboard for UI toggles
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (screen !== "playing") return;
+      if (screen !== "playing" || state?.story) return;
       if (e.code === "KeyE") {
         e.preventDefault();
         setInvOpen((v) => !v);
@@ -923,9 +964,10 @@ export default function App() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [screen, invOpen]);
+  }, [screen, invOpen, state?.story]);
 
   const playing = screen === "playing";
+  const c2Ending = (state?.ending as EndingId | null) ?? null;
   const [isTouch, setIsTouch] = useState(false);
   useEffect(() => {
     setIsTouch(typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0));
@@ -978,39 +1020,40 @@ export default function App() {
           >
             <Stage runId={runId} mode={startMode} worldId={playWorldId} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
           </div>
-          {state && !ended && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
-          {state && !ended && !invOpen && !pauseOpen && (
+          {state && !ended && !state.story && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
+          {state && !ended && !invOpen && !pauseOpen && !state.story && (
             <div className="absolute bottom-28 left-3 z-10 rounded-lg border border-white/10 bg-black/60 p-1 backdrop-blur-sm">
               <Minimap engineRef={engineRef} state={state} />
             </div>
           )}
-          {isTouch && state && !ended && !invOpen && !pauseOpen && (
+          {isTouch && state && !ended && !invOpen && !pauseOpen && !state.story && (
             <TouchControls
               engineRef={engineRef}
             />
           )}
-          {state && !ended && state.nearPortal && !invOpen && !pauseOpen && (
+          {state && !ended && state.nearPortal && !invOpen && !pauseOpen && !state.story && (
             <div className="absolute left-1/2 top-[12%] z-10 -translate-x-1/2 animate-pulse rounded-xl border border-purple-400/40 bg-purple-900/60 px-5 py-2 text-sm font-semibold text-purple-100 shadow-lg backdrop-blur-sm">
               {t("near_portal")}
             </div>
           )}
-          {saving && (
+          {saving && !state?.story && (
             <div className="absolute right-4 top-12 z-10 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-xs text-white/80 backdrop-blur-sm">
               💾 {t("saving")}
             </div>
           )}
-          {state && invOpen && !ended && (
+          {state && invOpen && !ended && !state.story && (
             <InventoryPanel
               s={state}
               onClose={() => setInvOpen(false)}
               onCraft={(id) => engineRef.current?.craft(id)}
               onConsume={(id) => engineRef.current?.consume(id)}
               onSummon={() => engineRef.current?.summonBoss()}
+              onFeed={() => engineRef.current?.feedHeir()}
               onSwap={(a, b) => engineRef.current?.swapSlots(a, b)}
               onSelectSlot={(i) => engineRef.current?.selectSlot(i)}
             />
           )}
-          {pauseOpen && !ended && (
+          {pauseOpen && !ended && !state?.story && (
             <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-md">
               <div className="w-full max-w-sm text-center">
                 <div className="text-4xl font-bold text-white/90">{t("paused")}</div>
@@ -1064,8 +1107,19 @@ export default function App() {
               </div>
             </div>
           )}
-          {ended === "win" && state && (
+          {ended === "win" && state && c2Ending && (
+            <Chapter2Ending ending={c2Ending} onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
+          )}
+          {ended === "win" && state && !c2Ending && (
             <EndingSequence onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
+          )}
+          {state?.story && !ended && (
+            <StoryOverlay
+              storyId={state.story}
+              heirFed={state.heirFed}
+              onAdvance={() => engineRef.current?.dismissStory()}
+              onChoose={(id) => engineRef.current?.chooseEnding(id)}
+            />
           )}
           {ended === "over" && state && (
             <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center px-6">
@@ -1122,6 +1176,11 @@ export default function App() {
             beginGame();
           }}
           onSelectWorld={(id) => {
+            audio.ensure();
+            click();
+            selectWorld(id);
+          }}
+          onChapter2={(id) => {
             audio.ensure();
             click();
             selectWorld(id);
